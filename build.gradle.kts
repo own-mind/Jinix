@@ -14,6 +14,7 @@ dependencies {
     implementation("com.google.auto.service:auto-service:1.1.1")
     annotationProcessor("com.google.auto.service:auto-service:1.1.1")
     implementation("org.ow2.asm:asm:9.8")
+    implementation("com.github.javaparser:javaparser-core:3.27.0")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

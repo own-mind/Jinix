@@ -4,9 +4,9 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.logging.Logger;
 import org.jinix.NativizationException;
+import org.jinix.plugin.compiler.MethodNativizer;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
-import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -29,7 +29,6 @@ public class JinixPlugin implements Plugin<Project> {
                 var marker = new File(outputDir, ".jinix_native_transform_done");
                 if (marker.exists()) return; // Already transformed
 
-                System.out.println(outputDir.toPath().toAbsolutePath());
                 target.fileTree(outputDir, spec -> spec.include("**/*.class")).forEach(classFile -> {
                     try {
                         byte[] original = Files.readAllBytes(classFile.toPath());
@@ -49,6 +48,8 @@ public class JinixPlugin implements Plugin<Project> {
                     //noinspection ResultOfMethodCallIgnored
                     marker.createNewFile();
                 } catch (IOException ignored) {}
+
+                new MethodNativizer().nativizeReported();
             });
         });
     }

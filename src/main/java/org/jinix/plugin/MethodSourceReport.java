@@ -3,6 +3,7 @@ package org.jinix.plugin;
 import com.sun.source.tree.MethodTree;
 
 import java.io.*;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -17,7 +18,6 @@ public class MethodSourceReport implements Serializable {
     public static MethodSourceReport retrieveReport(){
         if (!REPORT_FILE.exists())
             throw new IllegalStateException("No report to retrieve");
-        REPORT_FILE.deleteOnExit();
 
         try (var stream = new ObjectInputStream(new FileInputStream(REPORT_FILE))){
             return (MethodSourceReport) stream.readObject();
@@ -26,12 +26,11 @@ public class MethodSourceReport implements Serializable {
         }
     }
 
-    public void addMethod(String path, MethodTree methodTree){
-        methodData.put(path, new MethodData(
+    public void addMethod(String className, MethodTree methodTree){
+        methodData.put(fullName(className, methodTree.getName()), new MethodData(
+                className,
                 methodTree.getName().toString(),
-                methodTree.getParameters().stream().map(v -> new String[]{ v.getType().toString(), v.getName().toString() }).toArray(String[][]::new),
-                methodTree.getReturnType().toString(),
-                methodTree.getBody().toString()
+                methodTree.toString()
         ));
     }
 
@@ -43,17 +42,19 @@ public class MethodSourceReport implements Serializable {
         return methodData.containsKey(fullName(className, name));
     }
 
-    public static class MethodData implements Serializable {
-        public final String name;
-        public final String[][] parameters;  // Type, name
-        public final String returnType;
-        public final String body;
+    public Collection<MethodData> getMethodDataList(){
+        return methodData.values();
+    }
 
-        private MethodData(String name, String[][] parameters, String returnType, String body) {
+    public static class MethodData implements Serializable {
+        public final String declaringClassName;
+        public final String name;
+        public final String declaration;
+
+        private MethodData(String declaringClassName, String name, String declaration) {
+            this.declaringClassName = declaringClassName;
             this.name = name;
-            this.parameters = parameters;
-            this.returnType = returnType;
-            this.body = body;
+            this.declaration = declaration;
         }
     }
 }
