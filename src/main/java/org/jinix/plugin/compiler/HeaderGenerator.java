@@ -2,22 +2,17 @@ package org.jinix.plugin.compiler;
 
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
-import com.github.javaparser.ast.type.Type;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.jinix.plugin.compiler.Transpiler.jniType;
 
 public class HeaderGenerator {
     private StringBuilder result;
-    private List<JniFunctionDeclaration> declarations;
+    private Map<String, List<JniFunctionDeclaration>> declarations;
 
     private void generateDeclarations(String originalClassName, Collection<MethodDeclaration> methods) {
         String className = originalClassName.replace('.', '_');
@@ -31,20 +26,21 @@ public class HeaderGenerator {
 
             result.append("JNIEXPORT ").append(returnType).append(" JNICALL ").append(jniName).append("(JNIEnv *, jobject");
 
-            var declaration = new JniFunctionDeclaration(jniName, new ArrayList<>());
+            var declaration = new JniFunctionDeclaration(method.getName().asString(), jniName, new ArrayList<>(), returnType);
             for (Parameter parameter : method.getParameters()) {
                 declaration.parameters.add(parameter);
                 result.append(", ").append(jniType(parameter.getType()));
             }
 
+            declarations.computeIfAbsent(originalClassName, k -> new ArrayList<>()).add(declaration);
+
             result.append(");\n\n");
         }
     }
 
-    public List<JniFunctionDeclaration> generateHeader(Map<String, List<MethodDeclaration>> parsedMethods, File destination) {
+    public Map<String, List<JniFunctionDeclaration>> generateHeader(Map<String, List<MethodDeclaration>> parsedMethods, File destination) {
         this.result = new StringBuilder();
-        this.declarations = new ArrayList<>();
-
+        this.declarations = new HashMap<>();
 
         // Standard JNI header guards
         result.append("""
@@ -79,5 +75,5 @@ public class HeaderGenerator {
         return declarations;
     }
 
-    public record JniFunctionDeclaration(String name, List<Parameter> parameters){}
+    public record JniFunctionDeclaration(String originalName, String name, List<Parameter> parameters, String returnType){}
 }
