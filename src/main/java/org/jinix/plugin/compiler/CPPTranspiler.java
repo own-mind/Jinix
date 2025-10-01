@@ -36,7 +36,7 @@ public class CPPTranspiler extends Transpiler {
 
     private String transpileStatement(Statement statement) {
         return switch (statement) {
-            case ExpressionStmt stmt -> transpileExpression(stmt.getExpression());
+            case ExpressionStmt stmt -> stmt(transpileExpression(stmt.getExpression()));
             default -> throw new IllegalStateException("Unexpected value: " + statement);
         };
     }
@@ -44,9 +44,51 @@ public class CPPTranspiler extends Transpiler {
     private String transpileExpression(Expression stmt) {
         return switch (stmt) {
             case VariableDeclarationExpr expr -> combine(expr.getVariables(), this::transpileVariableDeclaration);
+            case BinaryExpr expr -> transpileBinary(expr);
+            case UnaryExpr expr -> transpileUnary(expr);
             case LiteralExpr expr -> transpileLiteral(expr);
+            case AssignExpr expr -> transpileAssign(expr);
+            case CastExpr expr -> transpileCast(expr);
+            case ConditionalExpr expr -> transpileConditional(expr);
+            case EnclosedExpr expr -> "(" + transpileExpression(expr.getInner()) + ")";
+            case NameExpr expr -> expr.getNameAsString();
             default -> throw new IllegalStateException("Unexpected value: " + stmt);
         };
+    }
+
+    private String transpileConditional(ConditionalExpr expr) {
+        return "%s ? %s : %s".formatted(
+                transpileExpression(expr.getCondition()),
+                transpileExpression(expr.getThenExpr()),
+                transpileExpression(expr.getElseExpr()));
+    }
+
+    private String transpileCast(CastExpr expr) {
+        return "(%s)%s".formatted(transpileType(expr.getType()), transpileExpression(expr.getExpression()));
+    }
+
+    private String transpileAssign(AssignExpr expr) {
+        if (expr.getOperator() == AssignExpr.Operator.UNSIGNED_RIGHT_SHIFT) {
+            throw new IllegalArgumentException("Unsupported >>>=");
+        }
+
+        return transpileExpression(expr.getTarget()) + " " + expr.getOperator().asString() + " " + transpileExpression(expr.getValue());
+    }
+
+    private String transpileUnary(UnaryExpr expr) {
+        return expr.getOperator().asString() + transpileExpression(expr.getExpression());
+    }
+
+    private String transpileBinary(BinaryExpr expr) {
+        var left = transpileExpression(expr.getLeft());
+        var right = transpileExpression(expr.getRight());
+
+        var operator = expr.getOperator().asString();
+        if (operator.equals(">>>")) {
+            throw new IllegalArgumentException("Unsupported >>>");
+        }
+
+        return left + " " + operator + " " + right;
     }
 
     private String transpileLiteral(LiteralExpr expr) {
@@ -65,8 +107,8 @@ public class CPPTranspiler extends Transpiler {
         String name = declarator.getNameAsString();
         String value = declarator.getInitializer().map(this::transpileExpression).orElse(null);
 
-        return value == null ? apply("%s %s;", type, name)
-                : apply("%s %s = %s;", type, name, value);
+        return value == null ? "%s %s;".formatted(type, name)
+                : "%s %s = %s;".formatted(type, name, value);
     }
 
     private String transpileType(Type type) {
@@ -74,6 +116,8 @@ public class CPPTranspiler extends Transpiler {
 
         if (type.isVarType() || res.equals("var")) {
             res = "auto";
+        } else if (res.equals("boolean")) {
+            res = "bool";
         } else if (res.equals("String")) {
             include(Include.STRING);
             res = "std::string";
@@ -93,7 +137,7 @@ public class CPPTranspiler extends Transpiler {
         return nodes.stream().map(mapper).collect(Collectors.joining("\n"));
     }
 
-    private String apply(String s, Object... args) {
+    private String stmt(String s, Object... args) {
         return s.formatted(args).indent(currentIndent * INDENT_LENGTH).stripTrailing();
     }
 

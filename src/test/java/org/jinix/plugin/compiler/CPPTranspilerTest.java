@@ -39,7 +39,7 @@ class CPPTranspilerTest {
         float a = 0.1;
         double a = 0.23d;
         char a = 'a';
-        boolean a = false;
+        bool a = false;
         auto a = nullptr;
         std::string a = "val\\"ue";
         std::string a = "First\\
@@ -53,12 +53,24 @@ class CPPTranspilerTest {
     void expressions() {
         var parsed = parse("""
         void method() {
-            
+            int a = 3 + 5;
+            int a = 5 + (3 - 4) * 5;
+            boolean a = !false;
+            boolean a = !!!false + ++a;
+            var a = (b += 1) > 0;
+            int a = (int) (float) b;
+            int a = a ? b : c;
         }
         """);
 
         assertEquals("""
-        
+        int a = 3 + 5;
+        int a = 5 + (3 - 4) * 5;
+        bool a = !false;
+        bool a = !!!false + ++a;
+        auto a = (b += 1) > 0;
+        int a = (int)(float)b;
+        int a = a ? b : c;
         """.trim(), transpiler.transpileBody(parsed));
     }
 
