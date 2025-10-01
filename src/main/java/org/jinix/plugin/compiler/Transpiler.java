@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+// TODO Transpiler should be able to transpile in parallel
 public abstract class Transpiler {
     protected static final String ENV_PARAM = "env";
     protected static final String THIS_PARAM = "thisObject";
