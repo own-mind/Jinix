@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CPPTranspilerTest {
-    private CPPTranspiler transpiler = new CPPTranspiler();
+    private final CPPTranspiler transpiler = new CPPTranspiler();
 
     @Test
     void declarationsAndLiterals() {
@@ -28,6 +28,9 @@ class CPPTranspilerTest {
                 Second
                 Third
                 \""";
+            final int a;
+            int a, b;
+            int a = 0, b = 1;
         }
         """);
 
@@ -46,6 +49,9 @@ class CPPTranspilerTest {
         Second\\
         Third\\
         ";
+        const int a;
+        int a, b;
+        int a = 0, b = 1;
         """.trim(), transpiler.transpileBody(parsed));
     }
 
@@ -60,6 +66,9 @@ class CPPTranspilerTest {
             var a = (b += 1) > 0;
             int a = (int) (float) b;
             int a = a ? b : c;
+            i++;
+            ++i;
+            a = 1;
         }
         """);
 
@@ -71,6 +80,139 @@ class CPPTranspilerTest {
         auto a = (b += 1) > 0;
         int a = (int)(float)b;
         int a = a ? b : c;
+        i++;
+        ++i;
+        a = 1;
+        """.trim(), transpiler.transpileBody(parsed));
+    }
+
+    @Test
+    void flowControl() {
+        var parsed = parse("""
+        void method() {
+            if (a == 3) a = 1;
+            if (a == 3) {
+                a = 1;
+            }
+            if (a == 3) {
+                a = 1;
+            } else { }
+            if (a == 3) {
+                a = 1;
+            } else if (a == 3) {
+                a = 1;
+            } else { }
+            break;
+            continue;
+            return;
+            return a;
+            throw a;
+            switch (a) {
+                case "1" -> a = 1;
+                case "2" -> {}
+                case "3":
+                    a = 1;
+                    break;
+                case "4":
+                    a = 1;
+                default -> throw a;
+            }
+        }
+        """);
+
+
+        assertEquals("""
+        if (a == 3) {
+            a = 1;
+        }
+        if (a == 3) {
+            a = 1;
+        }
+        if (a == 3) {
+            a = 1;
+        } else {
+        
+        }
+        if (a == 3) {
+            a = 1;
+        } else {
+            if (a == 3) {
+                a = 1;
+            } else {
+        
+            }
+        }
+        break;
+        continue;
+        return;
+        return a;
+        throw a;
+        switch (a) {
+            case "1":
+                a = 1;
+            case "2":
+            case "3":
+                a = 1;
+                break;
+            case "4":
+                a = 1;
+            default:
+                throw a;
+        }
+        """.trim(), transpiler.transpileBody(parsed));
+    }
+
+
+    @Test
+    void loops() {
+        var parsed = parse("""
+        void method() {
+            while (true) {
+                a = 1;
+            }
+            do {
+                a = 1;
+            } while(true);
+            while (true) {
+                while (true) {
+                    a = 1;
+                }
+            }
+            for (int i = 0, b = 0; i < a; i++, b = b * 2) {
+                a = 1;
+            }
+            for (i = 0, b = 0;;);
+            for (;;);
+            for (int a : array) {
+                a = 1;
+            }
+        }
+        """);
+
+        assertEquals("""
+        while (true) {
+            a = 1;
+        }
+        do {
+            a = 1;
+        } while (true);
+        while (true) {
+            while (true) {
+                a = 1;
+            }
+        }
+        for (int i = 0, b = 0; i < a; i++, b = b * 2) {
+            a = 1;
+        }
+        for (i = 0, b = 0; ; ) {
+            ;
+        }
+        for (; ; ) {
+            ;
+        }
+        for (int a : array) {
+            a = 1;
+        }
         """.trim(), transpiler.transpileBody(parsed));
     }
 
