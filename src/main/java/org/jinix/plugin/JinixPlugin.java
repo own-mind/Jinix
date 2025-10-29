@@ -1,8 +1,13 @@
 package org.jinix.plugin;
 
+import com.github.javaparser.resolution.TypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.api.logging.Logger;
+import org.gradle.api.plugins.JavaPluginExtension;
 import org.jinix.NativizationException;
 import org.jinix.plugin.compiler.MethodNativizer;
 import org.objectweb.asm.ClassReader;
@@ -19,6 +24,8 @@ public class JinixPlugin implements Plugin<Project> {
 
     @Override
     public void apply(Project target) {
+        if (GROUP.equals(target.getGroup())) return;
+
         String dependencyNotation = GROUP + ":" + NAME + ":" + VERSION;
         target.getDependencies().add("implementation", dependencyNotation);
         target.getDependencies().add("annotationProcessor", dependencyNotation);
@@ -49,8 +56,29 @@ public class JinixPlugin implements Plugin<Project> {
                     marker.createNewFile();
                 } catch (IOException ignored) {}
 
-                new MethodNativizer().nativizeReported();
+                var symbolSolver = setupTypeSolver(target);
+                new MethodNativizer(symbolSolver).nativizeReported();
             });
         });
+    }
+
+    private TypeSolver setupTypeSolver(Project target) {
+        var solver = new CombinedTypeSolver();
+        solver.add(new ReflectionTypeSolver());   // Java's libraries
+        solver.add(new JavaParserTypeSolver(target.file("src/main/java")));
+
+        // Adding dependencies to solver
+        target.getExtensions().getByType(JavaPluginExtension.class)
+                .getSourceSets().forEach(sourceSet -> {
+                    try {
+                        for (File f : sourceSet.getCompileClasspath().getFiles()) {
+                            solver.add(new JarTypeSolver(f));
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        return solver;
     }
 }

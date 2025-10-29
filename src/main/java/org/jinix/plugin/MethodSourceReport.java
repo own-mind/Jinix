@@ -1,5 +1,6 @@
 package org.jinix.plugin;
 
+import com.github.javaparser.ast.body.MethodDeclaration;
 import com.sun.source.tree.MethodTree;
 
 import java.io.*;
@@ -34,6 +35,10 @@ public class MethodSourceReport implements Serializable {
         ));
     }
 
+    public void addMethod(String className, MethodData data){
+        methodData.put(fullName(className, data.name), data);
+    }
+
     static String fullName(CharSequence className, CharSequence methodName) {
         return className + "#" + methodName;
     }
@@ -46,12 +51,18 @@ public class MethodSourceReport implements Serializable {
         return methodData.values();
     }
 
+    public String getMethodDeclaringClass(MethodDeclaration method) {
+        //TODO argument overload support
+        return methodData.values().stream().filter(m -> m.name.equals(method.getNameAsString())).findFirst()
+                .map(m -> m.declaringClassName).orElse(null);
+    }
+
     public static class MethodData implements Serializable {
         public final String declaringClassName;
         public final String name;
         public final String declaration;
 
-        private MethodData(String declaringClassName, String name, String declaration) {
+        public MethodData(String declaringClassName, String name, String declaration) {
             this.declaringClassName = declaringClassName;
             this.name = name;
             this.declaration = declaration;

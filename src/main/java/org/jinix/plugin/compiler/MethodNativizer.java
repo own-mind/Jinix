@@ -1,5 +1,9 @@
 package org.jinix.plugin.compiler;
 
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.resolution.TypeSolver;
+import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import org.jinix.plugin.MethodSourceReport;
 
 import java.io.File;
@@ -9,18 +13,24 @@ import java.nio.file.Path;
 import java.util.stream.Collectors;
 
 public class MethodNativizer {
+    private final TypeSolver typeSolver;
     private File headerFile;
     private File transpiledSourceFile;
 
-    public void nativizeReported(){
+    public MethodNativizer(TypeSolver typeSolver) {
+        this.typeSolver = typeSolver;
+    }
+
+    public void nativizeReported() {
         var report = MethodSourceReport.retrieveReport();
-        var transpiler = new CPPTranspiler();
+        var transpiler = new CPPTranspiler(typeSolver, report);
 
         var temp = prepareTempDirectory();
 
+        var parser = new JavaParser(new ParserConfiguration().setSymbolResolver(new JavaSymbolSolver(typeSolver)));
         var parsedMethods = report.getMethodDataList().stream()
                 .collect(Collectors.groupingBy(m -> m.declaringClassName,
-                        Collectors.mapping(m -> transpiler.parseMethod(m.declaration), Collectors.toList())));
+                        Collectors.mapping(m -> transpiler.parseMethod(m.declaration, parser), Collectors.toList())));
 
         this.headerFile = new File(temp, "jinix.h");
         var functionDeclarations = new HeaderGenerator().generateHeader(parsedMethods, this.headerFile);

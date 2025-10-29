@@ -17,17 +17,18 @@ public class Main {
 
     @Nativize
     public int testNative(int n){
-        var result = 0;
-        for (int r = 0; r < n; r++) {
-            int[] array = new int[10000];
-            array[0] = 1;
-            for (int i = 2; i < 10000; i++) {
-                array[i] = array[i - 1] + array[i - 2];
-            }
-            result += array[9999];
-        }
-
-        return result;
+        return 1;
+//        var result = 0;
+//        for (int r = 0; r < n; r++) {
+//            int[] array = new int[10000];
+//            array[0] = 1;
+//            for (int i = 2; i < 10000; i++) {
+//                array[i] = array[i - 1] + array[i - 2];
+//            }
+//            result += array[9999];
+//        }
+//
+//        return result;
     }
 
     public int test(int n) {

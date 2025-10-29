@@ -1,9 +1,10 @@
 package org.jinix.plugin.compiler;
 
-import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.type.Type;
+import com.github.javaparser.resolution.TypeSolver;
+import org.jinix.plugin.MethodSourceReport;
 import org.jinix.plugin.compiler.HeaderGenerator.JniFunctionDeclaration;
 
 import java.io.File;
@@ -18,6 +19,15 @@ import java.util.stream.Collectors;
 public abstract class Transpiler {
     protected static final String ENV_PARAM = "env";
     protected static final String THIS_PARAM = "thisObject";
+    protected static final String THIS_CLASS = "thisClass";
+
+    protected final TypeSolver solver;
+    protected final MethodSourceReport sourceReport;
+
+    protected Transpiler(TypeSolver solver, MethodSourceReport report) {
+        this.solver = solver;
+        this.sourceReport = report;
+    }
 
     protected abstract String transpileBody(MethodDeclaration method);
     protected abstract String getFileExtension();
@@ -39,6 +49,8 @@ public abstract class Transpiler {
             out.println("#include \"jinix.h\"");
             out.println();
 
+            //TODO add preamble
+
             for (String className : declarationsMap.keySet()) {
                 var declarations = declarationsMap.get(className);
                 var methods = methodsMap.get(className);
@@ -54,11 +66,12 @@ public abstract class Transpiler {
         }
     }
 
-    public MethodDeclaration parseMethod(String methodBody) {
+    public MethodDeclaration parseMethod(String methodBody, JavaParser parser) {
         // We enclose method in a class so that Java Parser could read it
         var enclosed = "class Dummy {\n" + methodBody + "\n}";
 
-        var compilationUnit = StaticJavaParser.parse(enclosed);
+        var compilationUnit = parser.parse(enclosed).getResult().orElseThrow();
+
         var dummyClass = compilationUnit.getClassByName("Dummy").orElseThrow();
         return dummyClass.getMethods().getFirst();
     }

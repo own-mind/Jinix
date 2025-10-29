@@ -1,3 +1,5 @@
+import org.gradle.api.internal.artifacts.dependencies.DefaultFileCollectionDependency
+
 plugins {
     id("java-gradle-plugin")
     id("maven-publish")
@@ -14,7 +16,7 @@ dependencies {
     implementation("com.google.auto.service:auto-service:1.1.1")
     annotationProcessor("com.google.auto.service:auto-service:1.1.1")
     implementation("org.ow2.asm:asm:9.8")
-    implementation("com.github.javaparser:javaparser-core:3.27.0")
+    implementation("com.github.javaparser:javaparser-symbol-solver-core:3.27.1")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -29,8 +31,20 @@ gradlePlugin {
     }
 }
 
-sourceSets.main {
-    java.srcDirs("src/main/java", "build/generated/sources/annotationProcessor/java/main")
+configurations.all {
+    withDependencies {
+        val toModify = filterIsInstance<DefaultFileCollectionDependency>()
+
+        toModify.forEach { dep ->   // JavaParser dependency from Gradle API conflicts with newer versions
+            val filteredFiles = dep.files.filter { file -> !file.name.contains("javaparser") }
+            if (!filteredFiles.isEmpty) {
+                remove(dep)
+                add(project.dependencies.create(project.files(filteredFiles)))
+            } else {
+                remove(dep)
+            }
+        }
+    }
 }
 
 publishing {

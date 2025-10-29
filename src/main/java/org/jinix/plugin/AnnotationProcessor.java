@@ -27,9 +27,9 @@ public class AnnotationProcessor extends AbstractProcessor {
                         if (e instanceof ExecutableElement executableElement)
                             methodModifier.registerSource(executableElement);
                     });
-            methodModifier.writeReport(); // TODO inefficient, writing on every class
         }
 
+        methodModifier.writeReport(); // TODO inefficient, writing on every class
         return true;
     }
 
