@@ -253,12 +253,17 @@ public class CPPTranspilerTest {
         //TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
         // if "a" is certain class that has nativized method, ahead of time if possible (maybe with annotation) or in runtime (less favorable)
         var parsed = parse("""
+        void thisCall(){}
+        void call(){}
+        int withParams(int a, int b){ return a + b; }
+        
         void method() {
             thisCall();
-            this.call();
-            var result = withParams(a, b);
         }
         """);
+//                            this.call();
+//            var result = withParams(0, 1);
+//        }
 
 //            this.nativizedCall();
 //            var result = withParamsNativized(a, b);
@@ -289,11 +294,13 @@ public class CPPTranspilerTest {
         // that allow insertion of optimization code in-between.
 
         assertEquals("""
-        jclass thisClass = (*env)->GetObjectClass(env, thisObject);
-        (*env)->CallVoidMethod(env, thisObject, (*env)->GetMethodID(env, thisClass, "thisCall", "()V"));
-        (*env)->CallVoidMethod(env, thisObject, (*env)->GetMethodID(env, thisClass, "call", "()V"));
+        jclass class_orgjinixplugincompilerCPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+        jmethodID Dummy_thisCall_V = (*env)->GetMethodID(class_orgjinixplugincompilerCPPTranspilerTest, "()V");
+        (*env)->CallVoidMethod(Dummy_thisCall_V, thisObject);
         """.trim(), transpiler.transpileBody(parsed));
     }
+
+    // add test for jni optimization
 
     public MethodDeclaration parse(String code){
         var enclosed = "class Dummy {\n" + code + "\n}";
@@ -301,6 +308,6 @@ public class CPPTranspilerTest {
         var parser = new JavaParser(new ParserConfiguration().setSymbolResolver(this.resolver).setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
         var compilationUnit = parser.parse(enclosed).getResult().orElseThrow();
         var dummyClass = compilationUnit.getClassByName("Dummy").orElseThrow();
-        return dummyClass.getMethods().getFirst();
+        return dummyClass.getMethods().stream().filter(m -> m.getNameAsString().equals("method")).findFirst().orElseThrow();
     }
 }

@@ -19,7 +19,6 @@ import java.util.stream.Collectors;
 public abstract class Transpiler {
     protected static final String ENV_PARAM = "env";
     protected static final String THIS_PARAM = "thisObject";
-    protected static final String THIS_CLASS = "thisClass";
 
     protected final TypeSolver solver;
     protected final MethodSourceReport sourceReport;
