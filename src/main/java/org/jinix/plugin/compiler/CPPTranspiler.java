@@ -27,7 +27,6 @@ public class CPPTranspiler extends Transpiler {
     private final Set<Include> toInclude = new HashSet<>();
 
     // Per transpilation:
-    private int currentIndent;
     private ResolvedType thisType;
 
     protected CPPTranspiler(TypeSolver solver, MethodSourceReport report) {
@@ -36,7 +35,6 @@ public class CPPTranspiler extends Transpiler {
 
     @Override
     protected String transpileBody(MethodDeclaration method) {
-        this.currentIndent = 0;
         this.thisType = new ReferenceTypeImpl(solver.solveType(sourceReport.getMethodDeclaringClass(method)));
 
         var result = new StringBuilder();
@@ -50,7 +48,7 @@ public class CPPTranspiler extends Transpiler {
 
     private List<CPPStatement> transpileStatementOrBlock(Statement statement) {
         return statement instanceof BlockStmt stmt ? stmt.getStatements().stream().map(this::transpileStatement).collect(Collectors.toList())
-                : List.of(transpileStatement(statement));
+                : new ArrayList<>(List.of(transpileStatement(statement)));
     }
 
     private CPPStatement transpileStatement(Statement statement) {
@@ -104,26 +102,21 @@ public class CPPTranspiler extends Transpiler {
         var input = transpileExpression(stmt.getSelector());
         var result = new StringBuilder(stmt("switch (%s) {\n", input));
         List<List<CPPStatement>> blocks = new ArrayList<>();
-        currentIndent++;
 
         stmt.getEntries().forEach(entry -> {
             if (entry.getLabels().isEmpty()){
-                result.append(stmt("default:\n"));
-            } else {
+                result.append("default:\n");
+            } else {    //TODO it is important to see how this will work out for Static.fields and enums (and if does, add jni inheritance)
                 entry.getLabels().forEach(label -> result.append(stmt("case %s:\n", transpileExpression(label))));
             }
 
-            currentIndent++;
-            var block = entry.getStatements().stream().flatMap(s -> transpileStatementOrBlock(s).stream()).toList();
+            var block = entry.getStatements().stream().flatMap(s -> transpileStatementOrBlock(s).stream()).collect(Collectors.toList());
             if (!block.isEmpty()) {
                 blocks.add(block);
                 result.append("#\n");
             }
-
-            currentIndent--;
         });
 
-        currentIndent--;
         result.append(stmt("}"));
         return new CPPStatement(BlockType.SWITCH, blocks, formatingBlocks(result.toString())).inherit(input);
     }
@@ -131,9 +124,7 @@ public class CPPTranspiler extends Transpiler {
     private CPPStatement transpileForEach(ForEachStmt stmt) {
         var collection = transpileExpression(stmt.getIterable());
         var result = stmt("for (%s : %s) {\n#\n}", transpileExpression(stmt.getVariable()), collection);
-        currentIndent++;
         var block = transpileStatementOrBlock(stmt.getBody());
-        currentIndent--;
 
         return new CPPStatement(BlockType.FOR, List.of(block), formatingBlocks(result)).inherit(collection);
     }
@@ -145,18 +136,14 @@ public class CPPTranspiler extends Transpiler {
                 stmt.getCompare().map(s -> statements.write(transpileExpression(s)).toString()).orElse(""),
                 stmt.getUpdate().stream().map(s -> statements.write(transpileExpression(s)).toString()).collect(Collectors.joining(", "))
         );
-        currentIndent++;
         var block = transpileStatementOrBlock(stmt.getBody());
-        currentIndent--;
 
         return new CPPStatement(BlockType.FOR, List.of(block), formatingBlocks(result)).inherit(statements);
     }
 
     private CPPStatement transpileDoWhile(DoStmt stmt) {
         var result = stmt("do {\n#\n");
-        currentIndent++;
         var block = transpileStatementOrBlock(stmt.getBody());
-        currentIndent--;
         var condition = transpileExpression(stmt.getCondition());
         result += stmt("} while (%s);", condition);
 
@@ -166,9 +153,7 @@ public class CPPTranspiler extends Transpiler {
     private CPPStatement transpileWhile(WhileStmt stmt) {
         var condition = transpileExpression(stmt.getCondition());
         var code = stmt("while (%s) {\n#\n}", condition);
-        currentIndent++;
         var block = transpileStatementOrBlock(stmt.getBody());
-        currentIndent--;
 
         return new CPPStatement(BlockType.WHILE, List.of(block), formatingBlocks(code)).inherit(condition);
     }
@@ -178,18 +163,13 @@ public class CPPTranspiler extends Transpiler {
         var code = stmt("if (%s) {\n#\n", condition);
         List<List<CPPStatement>> blocks = new ArrayList<>();
 
-        currentIndent++;
         blocks.add(transpileStatementOrBlock(ifStmt.getThenStmt()));
 
         if (ifStmt.getElseStmt().isPresent()) {
-            currentIndent--;
             code += stmt("} else {\n#\n");
-
-            currentIndent++;
             blocks.add(transpileStatementOrBlock(ifStmt.getElseStmt().get()));
         }
 
-        currentIndent--;
         code += stmt("}");
         return new CPPStatement(BlockType.IF, blocks, formatingBlocks(code)).inherit(condition);
     }
@@ -227,23 +207,37 @@ public class CPPTranspiler extends Transpiler {
         }
 
         var resolvedMethod = expr.resolve();
-        var findClass = jniFindClass(scopeClass);
-        var getMethodId = jniGetMethodId(resolvedMethod, findClass);
+        JniStatement findClass = jniFindClass(scopeClass);
+        JniStatement getMethodId = resolvedMethod.isStatic() ? jniGetStaticMethodId(resolvedMethod, findClass) :
+                jniGetMethodId(resolvedMethod, findClass);
 
-        List<String> params = new ArrayList<>();
+        // Params order should be: jobject/jclass, methodId, ...provided args. The first one is added in the block below
+        List<String> args = new ArrayList<>();
+        args.add(getMethodId.resultingVar);
         for (Expression argument : expr.getArguments()) {
-            params.add(statements.write(transpileExpression(argument)).toString());
+            args.add(statements.write(transpileExpression(argument)).toString());
         }
 
-        CPPExpression call;
-        if (resolvedMethod.getReturnType().isVoid()) {
-            params.addFirst(scope);
-            params.addFirst(getMethodId.resultingVar);
-            call = new CPPExpression(jniEnvCall("CallVoidMethod", params.toArray(String[]::new)), resolvedMethod.getReturnType());
+        String callType, cast = "", type;
+        if (resolvedMethod.isStatic()) {
+            args.addFirst(findClass.resultingVar);
+            callType = "CallStatic";
         } else {
-            throw new RuntimeException("TODO");
+            args.addFirst(scope);
+            callType = "Call";
         }
 
+        if (resolvedMethod.getReturnType().isVoid()) {
+            type = "Void";
+        } else if (resolvedMethod.getReturnType().isPrimitive()) {
+            var retType = resolvedMethod.getReturnType().describe();
+            cast = "(" + retType + ")";    // Here we cast to C type from j-type
+            type = Character.toUpperCase(retType.charAt(0)) + retType.substring(1);
+        } else {
+            type = "Object";
+        }
+
+        CPPExpression call =new CPPExpression(cast + jniEnvCall(callType + type + "Method", args.toArray(String[]::new)), resolvedMethod.getReturnType());
         call.jniStatements.addAll(List.of(findClass, getMethodId));
         call.inherit(statements);
 
@@ -333,7 +327,7 @@ public class CPPTranspiler extends Transpiler {
             include(Include.STRING);
             res = "std::string";
         } else if (!type.isPrimitiveType()){
-            throw new RuntimeException("TODO");
+            res = "jobject";
         }
 
         return new CPPExpression(res, type.resolve());
@@ -377,21 +371,32 @@ public class CPPTranspiler extends Transpiler {
 
     private static String uniqueMethodIdName(ResolvedMethodDeclaration method) {
         var signature = getMethodSignature(method).replaceAll("[();/]", "").replace("[", "A");
-        var className = method.getClassName().replace(".", "");
 
-        return className + "_" + method.getName() + "_" + signature;
+        return uniqueClassName(method.getClassName()) + "_" + method.getName() + "_" + signature;
     }
 
-    private JniStatement jniGetMethodId(ResolvedMethodDeclaration method, JniStatement getClassStatement) {
+    private static String uniqueClassName(String className) {
+        return className.replace(".", "_");
+    }
+
+    private JniStatement jniGetStaticMethodId(ResolvedMethodDeclaration method, JniStatement classStatement) {
         var varName = uniqueMethodIdName(method);
         return new JniStatement("jmethodID " + varName + " = " +
-                jniEnvCall("GetMethodID", getClassStatement.resultingVar, "\"" + getMethodSignature(method) + "\""),
+                jniEnvCall("GetStaticMethodID", classStatement.resultingVar, "\"" + method.getName() + "\"", "\"" + getMethodSignature(method) + "\""),
+                JniStatementType.GET_STATIC_METHOD_ID, varName
+        );
+    }
+
+    private JniStatement jniGetMethodId(ResolvedMethodDeclaration method, JniStatement classStatement) {
+        var varName = uniqueMethodIdName(method);
+        return new JniStatement("jmethodID " + varName + " = " +
+                jniEnvCall("GetMethodID", classStatement.resultingVar, "\"" + method.getName() + "\"", "\"" + getMethodSignature(method) + "\""),
                 JniStatementType.GET_METHOD_ID, varName
         );
     }
 
     private JniStatement jniFindClass(String name) {
-        var varName = "class_" + name.replace(".", "");
+        var varName = "class_" + uniqueClassName(name);
         return new JniStatement("jclass " + varName + " = " + jniEnvCall("FindClass", "\"" + name.replace(".", "/") + "\""),
                 JniStatementType.FIND_CLASS, varName
         );
@@ -409,12 +414,12 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private String stmt(String s, Object... args) {
-        return stmtWithIndent(s, currentIndent, args);
+        return s.formatted(args);
     }
 
-    private String stmtWithIndent(String s, int indent, Object... args) {
-        var r = s.formatted(args).indent(indent * INDENT_LENGTH);
-        if (!s.endsWith("\n"))
+    private String indent(String s) {
+        var r = s.indent(INDENT_LENGTH);
+        if (!s.isEmpty() && !s.endsWith("\n"))
             r = r.substring(0, r.length() - 1);
         return r;
     }
@@ -424,7 +429,7 @@ public class CPPTranspiler extends Transpiler {
             var parts = code.split("#");
             var builder = new StringBuilder();
             for (int i = 0; i < parts.length - 1; i++) {
-                builder.append(parts[i].replaceAll(" +$", "")).append(statementBlockToCode(blocks.get(i)));
+                builder.append(parts[i].replaceAll(" +$", "")).append(indent(statementBlockToCode(blocks.get(i))));
             }
 
             builder.append(parts[parts.length - 1]);
@@ -434,7 +439,12 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private String statementBlockToCode(List<CPPStatement> cppStatements) {
-        return cppStatements.stream().map(CPPStatement::getCodeAsStatement).collect(Collectors.joining("\n"));
+        StringJoiner joiner = new StringJoiner("\n");
+        for (CPPStatement cppStatement : cppStatements) {
+            String codeAsStatement = cppStatement.getCodeAsStatement();
+            joiner.add(codeAsStatement);
+        }
+        return joiner.toString();
     }
 
     private void include(Include i) {
@@ -504,23 +514,21 @@ public class CPPTranspiler extends Transpiler {
         IF, FOR, WHILE, SWITCH
     }
 
-    public class JniStatement extends CPPStatement {
+    public static class JniStatement extends CPPStatement {
         public final String code;
         public final JniStatementType type;
         public final String resultingVar;
-        public final int indent;   // Captures indent at expression creation
 
         public JniStatement(String code, JniStatementType type, String resultingVar) {
             super(code);
             this.code = code;
             this.type = type;
             this.resultingVar = resultingVar;
-            this.indent = currentIndent;
         }
 
         @Override
         public String getCodeAsStatement() {
-            return stmtWithIndent(code, indent) + ";";
+            return code + ";";
         }
 
         @Override
@@ -539,6 +547,7 @@ public class CPPTranspiler extends Transpiler {
 
     public enum JniStatementType {
         GET_METHOD_ID("GetMethodID"),
+        GET_STATIC_METHOD_ID("GetStaticMethodID"),
         FIND_CLASS("FindClass"),
         GET_OBJECT_CLASS("GetObjectClass");
 
@@ -549,10 +558,9 @@ public class CPPTranspiler extends Transpiler {
         }
     }
 
-    public class CPPExpression extends CPPStatement {
+    public static class CPPExpression extends CPPStatement {
         public final String code;
         public final ResolvedType type;
-        public final int indent;   // Captures indent at expression creation
 
         public CPPExpression(String code, ResolvedType type, Object... nodes) {
             this(code.formatted(nodes), type);
@@ -565,12 +573,11 @@ public class CPPTranspiler extends Transpiler {
             super(code);
             this.code = code;
             this.type = type;
-            this.indent = currentIndent;
         }
 
         @Override
         public String getCodeAsStatement() {
-            return stmtWithIndent(code + ";", indent);
+            return code + ";";
         }
 
         @Override
@@ -579,7 +586,7 @@ public class CPPTranspiler extends Transpiler {
         }
 
         public CPPExpression withCode(Function<CPPExpression, String> codeProvider) {
-            return new CPPExpression(codeProvider.apply(this), this.type);
+            return (CPPExpression) new CPPExpression(codeProvider.apply(this), this.type).inherit(this);
         }
     }
 

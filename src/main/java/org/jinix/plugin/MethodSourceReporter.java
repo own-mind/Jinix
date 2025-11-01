@@ -5,7 +5,9 @@ import com.sun.source.util.Trees;
 
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.element.ExecutableElement;
-import java.io.*;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +26,6 @@ public class MethodSourceReporter {
     public void registerSource(ExecutableElement element) {
         var methodTree = methodScanner.scan(element, trees);
         methodTrees.computeIfAbsent(element.getEnclosingElement().toString(), k -> new ArrayList<>()).add(methodTree);
-        System.err.println(methodTrees);
     }
 
     public void writeReport(){

@@ -12,6 +12,7 @@ import org.jinix.plugin.MethodSourceReport;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CPPTranspilerTest {
     private final CPPTranspiler transpiler;
@@ -164,7 +165,7 @@ public class CPPTranspilerTest {
             if (a == 3) {
                 a = 1;
             } else {
-        
+           \s
             }
         }
         break;
@@ -173,16 +174,16 @@ public class CPPTranspilerTest {
         return a;
         throw a;
         switch (a) {
-            case "1":
-                a = 1;
-            case "2":
-            case "3":
-                a = 1;
-                break;
-            case "4":
-                a = 1;
-            default:
-                throw a;
+        case "1":
+            a = 1;
+        case "2":
+        case "3":
+            a = 1;
+            break;
+        case "4":
+            a = 1;
+        default:
+            throw a;
         }
         """.trim(), transpiler.transpileBody(parsed));
     }
@@ -249,28 +250,35 @@ public class CPPTranspilerTest {
 
     @Test
     void methodsAndFields() {
-
         //TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
         // if "a" is certain class that has nativized method, ahead of time if possible (maybe with annotation) or in runtime (less favorable)
         var parsed = parse("""
+        @Nativize
+        void nativizedCall(){}
         void thisCall(){}
         void call(){}
         int withParams(int a, int b){ return a + b; }
+        class A {
+            static void staticCall();
+            static int staticCall(int a, long b);
+            void call(){}
+        }
         
         void method() {
             thisCall();
+            this.call();
+            var result = withParams(0, 1);
+            A a;
+            a.call();
+            A.staticCall();
+            var result = A.staticCall(0, 1);
         }
         """);
-//                            this.call();
-//            var result = withParams(0, 1);
-//        }
-
+//            this.vararg(1, 2, 3);
 //            this.nativizedCall();
 //            var result = withParamsNativized(a, b);
-//            a.call();
-//            A.staticCall();
 //            A.nativeStaticCall();
-//            var result = A.staticCall(a, b);
+//            this.nativizedVararg(1, 2, 3);
 //
 //            this.a = 1;
 //            this.a = this.b;
@@ -279,28 +287,140 @@ public class CPPTranspilerTest {
 //        }
 //        """);
 
-        //TODO method id and class optimizations: if class is used or method is called often,
-        // like in a loop or if annotated as such,
-        // then it is better to get its handle/id at the start of the method body,
-        // or at the logical block like if statement.
-        // Straight forward optimization: do all method handles, even single ones, at the start of logic block.
-        // The goal here is to not call them when method/class may be unreachable because of if statement.
-        // And don't forget that if there are duplicate method id calls,
-        // then you could do them in the upper level once, method level being the top one.
-        // If this implementation is used,
-        // then it is better alternative to current placement of thisClass call at the beginning of method body,
-        // since it could be unused because of if statement.
-        // Could require rewrite of transpilation storing logic, as list of independent blocks or trees,
-        // that allow insertion of optimization code in-between.
-
         assertEquals("""
-        jclass class_orgjinixplugincompilerCPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
-        jmethodID Dummy_thisCall_V = (*env)->GetMethodID(class_orgjinixplugincompilerCPPTranspilerTest, "()V");
-        (*env)->CallVoidMethod(Dummy_thisCall_V, thisObject);
+        jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+        jmethodID Dummy_thisCall_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "thisCall", "()V");
+        jmethodID Dummy_call_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "()V");
+        jmethodID Dummy_withParams_III = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "withParams", "(II)I");
+        jclass class_Dummy_A = (*env)->FindClass("Dummy/A");
+        jmethodID Dummy_A_call_V = (*env)->GetMethodID(class_Dummy_A, "call", "()V");
+        jmethodID Dummy_A_staticCall_V = (*env)->GetStaticMethodID(class_Dummy_A, "staticCall", "()V");
+        jmethodID Dummy_A_staticCall_IJI = (*env)->GetStaticMethodID(class_Dummy_A, "staticCall", "(IJ)I");
+        (*env)->CallVoidMethod(thisObject, Dummy_thisCall_V);
+        (*env)->CallVoidMethod(thisObject, Dummy_call_V);
+        auto result = (int)(*env)->CallIntMethod(thisObject, Dummy_withParams_III, 0, 1);
+        jobject a;
+        (*env)->CallVoidMethod(a, Dummy_A_call_V);
+        (*env)->CallStaticVoidMethod(class_Dummy_A, Dummy_A_staticCall_V);
+        auto result = (int)(*env)->CallStaticIntMethod(class_Dummy_A, Dummy_A_staticCall_IJI, 0, 1);
         """.trim(), transpiler.transpileBody(parsed));
     }
 
-    // add test for jni optimization
+    @Test
+    void jniFunction() {
+        inheritanceTest("int a = #;");
+        inheritanceTest("int a = call(#);");
+        inheritanceTest("int a = # + 1;");
+        inheritanceTest("int a = 1 + #;");
+        inheritanceTest("int a = !#;");
+        inheritanceTest("int a = (int)#;");
+        inheritanceTest("int a = # ? 1 : 0;");
+        inheritanceTest("int a = true ? # : 0;");
+        inheritanceTest("int a = true ? 1 : #;");
+        inheritanceTest("int a = (#);");
+
+        inheritanceTest("if(#) {}");
+        inheritanceTest("if(#) {} else {}");
+        inheritanceTest("switch(#) {}");
+        inheritanceTest("while(#) {}");
+        inheritanceTest("do {} while(#);");
+        inheritanceTest("for(#;;) {}");
+        inheritanceTest("for(;#;) {}");
+        inheritanceTest("for(;;#) {}");
+        inheritanceTest("for(#;#;#) {}");
+        inheritanceTest("return #;");
+        inheritanceTest("throw #;");
+
+        //TODO test for try-catch-finally
+        var parsed = parse("""
+        void call1(){}
+        void call2(){}
+        void call3(){}
+        void call4(){}
+        void call5(){}
+        
+        void method() {
+            call1();
+            if(true) {
+                call2();
+                call1();
+            } else if(true) {
+                call2();
+            } else {
+                call2();
+                call3();
+            }
+        
+            if(true) {
+                call5();
+            } else {
+                call5();
+            }
+        
+            switch("a"){
+                case "a" -> call3();
+                case "a" -> call2();
+            }
+        
+            if(true) {
+                while(true){ call4(); }
+            }
+        }
+        """);
+
+        assertEquals("""
+                jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+                jmethodID Dummy_call5_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call5", "()V");
+                jmethodID Dummy_call2_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call2", "()V");
+                jmethodID Dummy_call1_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call1", "()V");
+                (*env)->CallVoidMethod(thisObject, Dummy_call1_V);
+                if (true) {
+                    (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+                    (*env)->CallVoidMethod(thisObject, Dummy_call1_V);
+                } else {
+                    if (true) {
+                        (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+                    } else {
+                        jmethodID Dummy_call3_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call3", "()V");
+                        (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+                        (*env)->CallVoidMethod(thisObject, Dummy_call3_V);
+                    }
+                }
+                if (true) {
+                    (*env)->CallVoidMethod(thisObject, Dummy_call5_V);
+                } else {
+                    (*env)->CallVoidMethod(thisObject, Dummy_call5_V);
+                }
+                switch ("a") {
+                case "a":
+                    jmethodID Dummy_call3_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call3", "()V");
+                    (*env)->CallVoidMethod(thisObject, Dummy_call3_V);
+                case "a":
+                    (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+                }
+                if (true) {
+                    jmethodID Dummy_call4_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call4", "()V");
+                    while (true) {
+                        (*env)->CallVoidMethod(thisObject, Dummy_call4_V);
+                    }
+                }""", transpiler.transpileBody(parsed));
+    }
+
+    private void inheritanceTest(String code) {
+        code = """
+        int call(int a) { return a; }
+        void method() {
+            %s
+        }
+        """.formatted(code.replace("#", "call(1)"));
+        var result = transpiler.transpileBody(parse(code));
+
+        assertTrue(result.startsWith("""
+        jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+        jmethodID Dummy_call_II = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "(I)I");"""), result);
+    }
+    // TODO add test for jni optimization Check that all statements and expression inherit properly
+    //  and that loops handle optimization properly
 
     public MethodDeclaration parse(String code){
         var enclosed = "class Dummy {\n" + code + "\n}";
