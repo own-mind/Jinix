@@ -253,12 +253,16 @@ public class CPPTranspilerTest {
         //TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
         // if "a" is certain class that has nativized method, ahead of time if possible (maybe with annotation) or in runtime (less favorable)
         var parsed = parse("""
+        public int a = 1;
+        public int b = 2;
         @Nativize
         void nativizedCall(){}
         void thisCall(){}
         void call(){}
         int withParams(int a, int b){ return a + b; }
         class A {
+            public static int staticField = 0;
+            public int a = 1;
             static void staticCall();
             static int staticCall(int a, long b);
             void call(){}
@@ -268,10 +272,16 @@ public class CPPTranspilerTest {
             thisCall();
             this.call();
             var result = withParams(0, 1);
+            withParams(withParams(1, 2), 3);
             A a;
             a.call();
             A.staticCall();
             var result = A.staticCall(0, 1);
+            this.a = 1;
+            this.a = this.b;
+            A.staticField = 1;
+            a.a = 1;
+            var result = A.staticField;
         }
         """);
 //            this.vararg(1, 2, 3);
@@ -280,10 +290,6 @@ public class CPPTranspilerTest {
 //            A.nativeStaticCall();
 //            this.nativizedVararg(1, 2, 3);
 //
-//            this.a = 1;
-//            this.a = this.b;
-//            a.a = 1;
-//            A.staticField = 1;
 //        }
 //        """);
 
@@ -296,13 +302,23 @@ public class CPPTranspilerTest {
         jmethodID Dummy_A_call_V = (*env)->GetMethodID(class_Dummy_A, "call", "()V");
         jmethodID Dummy_A_staticCall_V = (*env)->GetStaticMethodID(class_Dummy_A, "staticCall", "()V");
         jmethodID Dummy_A_staticCall_IJI = (*env)->GetStaticMethodID(class_Dummy_A, "staticCall", "(IJ)I");
+        jfieldID Dummy_a = (*env)->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "a", "I");
+        jfieldID Dummy_b = (*env)->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "b", "I");
+        jfieldID Dummy_A_staticField = (*env)->GetStaticFieldID(class_Dummy_A, "staticField", "I");
+        jfieldID Dummy_A_a = (*env)->GetFieldID(class_Dummy_A, "a", "I");
         (*env)->CallVoidMethod(thisObject, Dummy_thisCall_V);
         (*env)->CallVoidMethod(thisObject, Dummy_call_V);
         auto result = (int)(*env)->CallIntMethod(thisObject, Dummy_withParams_III, 0, 1);
+        (int)(*env)->CallIntMethod(thisObject, Dummy_withParams_III, (int)(*env)->CallIntMethod(thisObject, Dummy_withParams_III, 1, 2), 3);
         jobject a;
         (*env)->CallVoidMethod(a, Dummy_A_call_V);
         (*env)->CallStaticVoidMethod(class_Dummy_A, Dummy_A_staticCall_V);
         auto result = (int)(*env)->CallStaticIntMethod(class_Dummy_A, Dummy_A_staticCall_IJI, 0, 1);
+        (*env)->SetIntField(thisObject, Dummy_a, 1);
+        (*env)->SetIntField(thisObject, Dummy_a, (int)(*env)->GetIntField(thisObject, Dummy_b));
+        (*env)->SetStaticIntField(class_Dummy_A, Dummy_A_staticField, 1);
+        (*env)->SetIntField(a, Dummy_A_a, 1);
+        auto result = (int)(*env)->GetStaticIntField(class_Dummy_A, Dummy_A_staticField);
         """.trim(), transpiler.transpileBody(parsed));
     }
 
@@ -330,6 +346,9 @@ public class CPPTranspilerTest {
         inheritanceTest("for(#;#;#) {}");
         inheritanceTest("return #;");
         inheritanceTest("throw #;");
+
+        inheritanceTest("call(#);");
+        inheritanceTest("this.field = (#);", true);
 
         //TODO test for try-catch-finally
         var parsed = parse("""
@@ -369,55 +388,65 @@ public class CPPTranspilerTest {
         """);
 
         assertEquals("""
-                jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
-                jmethodID Dummy_call5_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call5", "()V");
-                jmethodID Dummy_call2_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call2", "()V");
-                jmethodID Dummy_call1_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call1", "()V");
-                (*env)->CallVoidMethod(thisObject, Dummy_call1_V);
-                if (true) {
-                    (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
-                    (*env)->CallVoidMethod(thisObject, Dummy_call1_V);
-                } else {
-                    if (true) {
-                        (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
-                    } else {
-                        jmethodID Dummy_call3_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call3", "()V");
-                        (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
-                        (*env)->CallVoidMethod(thisObject, Dummy_call3_V);
-                    }
-                }
-                if (true) {
-                    (*env)->CallVoidMethod(thisObject, Dummy_call5_V);
-                } else {
-                    (*env)->CallVoidMethod(thisObject, Dummy_call5_V);
-                }
-                switch ("a") {
-                case "a":
-                    jmethodID Dummy_call3_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call3", "()V");
-                    (*env)->CallVoidMethod(thisObject, Dummy_call3_V);
-                case "a":
-                    (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
-                }
-                if (true) {
-                    jmethodID Dummy_call4_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call4", "()V");
-                    while (true) {
-                        (*env)->CallVoidMethod(thisObject, Dummy_call4_V);
-                    }
-                }""", transpiler.transpileBody(parsed));
+        jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+        jmethodID Dummy_call5_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call5", "()V");
+        jmethodID Dummy_call2_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call2", "()V");
+        jmethodID Dummy_call1_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call1", "()V");
+        (*env)->CallVoidMethod(thisObject, Dummy_call1_V);
+        if (true) {
+            (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+            (*env)->CallVoidMethod(thisObject, Dummy_call1_V);
+        } else {
+            if (true) {
+                (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+            } else {
+                jmethodID Dummy_call3_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call3", "()V");
+                (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+                (*env)->CallVoidMethod(thisObject, Dummy_call3_V);
+            }
+        }
+        if (true) {
+            (*env)->CallVoidMethod(thisObject, Dummy_call5_V);
+        } else {
+            (*env)->CallVoidMethod(thisObject, Dummy_call5_V);
+        }
+        switch ("a") {
+        case "a":
+            jmethodID Dummy_call3_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call3", "()V");
+            (*env)->CallVoidMethod(thisObject, Dummy_call3_V);
+        case "a":
+            (*env)->CallVoidMethod(thisObject, Dummy_call2_V);
+        }
+        if (true) {
+            jmethodID Dummy_call4_V = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call4", "()V");
+            while (true) {
+                (*env)->CallVoidMethod(thisObject, Dummy_call4_V);
+            }
+        }""", transpiler.transpileBody(parsed));
     }
 
     private void inheritanceTest(String code) {
+        inheritanceTest(code, false);
+    }
+
+    private void inheritanceTest(String code, boolean isContains) {
         code = """
         int call(int a) { return a; }
+        int field = 1;
         void method() {
             %s
         }
         """.formatted(code.replace("#", "call(1)"));
         var result = transpiler.transpileBody(parse(code));
 
-        assertTrue(result.startsWith("""
-        jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
-        jmethodID Dummy_call_II = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "(I)I");"""), result);
+        if (isContains) {
+            assertTrue(result.contains("jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass(\"org/jinix/plugin/compiler/CPPTranspilerTest\");")
+                    && result.contains("jmethodID Dummy_call_II = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, \"call\", \"(I)I\");"), result);
+        } else {
+            assertTrue(result.startsWith("""
+            jclass class_org_jinix_plugin_compiler_CPPTranspilerTest = (*env)->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+            jmethodID Dummy_call_II = (*env)->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "(I)I");"""), result);
+        }
     }
     // TODO add test for jni optimization Check that all statements and expression inherit properly
     //  and that loops handle optimization properly

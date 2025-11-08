@@ -7,6 +7,7 @@ import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.*;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.resolution.TypeSolver;
+import com.github.javaparser.resolution.declarations.ResolvedFieldDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedParameterDeclaration;
 import com.github.javaparser.resolution.model.typesystem.ReferenceTypeImpl;
@@ -176,6 +177,7 @@ public class CPPTranspiler extends Transpiler {
 
     private CPPExpression transpileExpression(Expression stmt) {
         return switch (stmt) {
+            case FieldAccessExpr expr -> transpileFieldAccess(expr);   // For getting the value only, see transpileAssign for setting
             case MethodCallExpr expr -> transpileCall(expr);
             case VariableDeclarationExpr expr -> transpileVariableDeclaration(expr);
             case BinaryExpr expr -> transpileBinary(expr);
@@ -189,6 +191,52 @@ public class CPPTranspiler extends Transpiler {
             case ThisExpr expr -> new CPPExpression(THIS_PARAM, thisType);  // Only as an argument, not field/method access
             default -> throw new IllegalStateException("Unexpected value: " + stmt);
         };
+    }
+
+    private CPPExpression transpileFieldAccess(FieldAccessExpr expr) {
+        String scope, scopeClass;
+        var statements = new StatementsList();
+
+        //TODO Handle fields without scope `this`
+        if (expr.getScope() instanceof ThisExpr) {
+            scope = THIS_PARAM;
+            scopeClass = thisType.describe();
+        } else {
+            var transpiled = transpileExpression(expr.getScope());
+            statements.add(transpiled);
+            scope = transpiled.code;
+            scopeClass = transpiled.type.describe();
+        }
+
+        var resolvedField = expr.resolve().asField();
+        var findClass = jniFindClass(scopeClass);
+        var getFieldId = resolvedField.isStatic() ? jniGetStaticFieldId(resolvedField, findClass) :
+                jniGetFieldId(resolvedField, findClass);
+
+        String callType, cast = "", scopeVar, type;
+        if (resolvedField.isStatic()) {
+            scopeVar = findClass.resultingVar;
+            callType = "GetStatic";
+        } else {
+            scopeVar = scope;
+            callType = "Get";
+        }
+
+        if (resolvedField.getType().isVoid()) {
+            type = "Void";
+        } else if (resolvedField.getType().isPrimitive()) {
+            var retType = resolvedField.getType().describe();
+            cast = "(" + retType + ")";
+            type = Character.toUpperCase(retType.charAt(0)) + retType.substring(1);
+        } else {
+            type = "Object";
+        }
+
+        CPPExpression getField = new CPPExpression(cast + jniEnvCall(callType + type + "Field", scopeVar, getFieldId.resultingVar), resolvedField.getType());
+        getField.jniStatements.addAll(List.of(findClass, getFieldId));
+        getField.inherit(statements);
+
+        return getField;
     }
 
     private CPPExpression transpileCall(MethodCallExpr expr) {
@@ -207,8 +255,8 @@ public class CPPTranspiler extends Transpiler {
         }
 
         var resolvedMethod = expr.resolve();
-        JniStatement findClass = jniFindClass(scopeClass);
-        JniStatement getMethodId = resolvedMethod.isStatic() ? jniGetStaticMethodId(resolvedMethod, findClass) :
+        var findClass = jniFindClass(scopeClass);
+        var getMethodId = resolvedMethod.isStatic() ? jniGetStaticMethodId(resolvedMethod, findClass) :
                 jniGetMethodId(resolvedMethod, findClass);
 
         // Params order should be: jobject/jclass, methodId, ...provided args. The first one is added in the block below
@@ -237,7 +285,7 @@ public class CPPTranspiler extends Transpiler {
             type = "Object";
         }
 
-        CPPExpression call =new CPPExpression(cast + jniEnvCall(callType + type + "Method", args.toArray(String[]::new)), resolvedMethod.getReturnType());
+        CPPExpression call = new CPPExpression(cast + jniEnvCall(callType + type + "Method", args.toArray(String[]::new)), resolvedMethod.getReturnType());
         call.jniStatements.addAll(List.of(findClass, getMethodId));
         call.inherit(statements);
 
@@ -261,8 +309,61 @@ public class CPPTranspiler extends Transpiler {
             throw new IllegalArgumentException("Unsupported >>>=");
         }
 
-        return new CPPExpression("%s %s %s", expr.calculateResolvedType(),
-                transpileExpression(expr.getTarget()), expr.getOperator().asString(), transpileExpression(expr.getValue()));
+        if (!expr.getTarget().isFieldAccessExpr()) {
+            return new CPPExpression("%s %s %s", expr.calculateResolvedType(),
+                    transpileExpression(expr.getTarget()), expr.getOperator().asString(), transpileExpression(expr.getValue()));
+        }
+
+        var fieldExpr = expr.getTarget().asFieldAccessExpr();
+        String scope, scopeClass;
+        var statements = new StatementsList();
+
+        //TODO Handle fields without scope `this`
+        if (fieldExpr.getScope() instanceof ThisExpr) {
+            scope = THIS_PARAM;
+            scopeClass = thisType.describe();
+        } else {
+            var transpiled = transpileExpression(fieldExpr.getScope());
+            statements.add(transpiled);
+            scope = transpiled.code;
+            scopeClass = transpiled.type.describe();
+        }
+
+        var resolvedField = fieldExpr.resolve().asField();
+        var findClass = jniFindClass(scopeClass);
+        var getFieldId = resolvedField.isStatic() ? jniGetStaticFieldId(resolvedField, findClass) :
+                jniGetFieldId(resolvedField, findClass);
+
+        String callType, scopeVar, type;
+        if (resolvedField.isStatic()) {
+            scopeVar = findClass.resultingVar;
+            callType = "SetStatic";
+        } else {
+            scopeVar = scope;
+            callType = "Set";
+        }
+
+        if (resolvedField.getType().isVoid()) {
+            type = "Void";
+        } else if (resolvedField.getType().isPrimitive()) {
+            var retType = resolvedField.getType().describe();
+            type = Character.toUpperCase(retType.charAt(0)) + retType.substring(1);
+        } else {
+            type = "Object";
+        }
+
+        var value = transpileExpression(expr.getValue());
+        statements.add(value);
+
+        //FIXME case like `int a = 1 - (this.field = 2)` will fails as the assign here wouldn't return the value.
+        // Possible solution is to create custom Set<Type>Field function that would handle that and use it everywhere (*)
+        // *: It is hard to tell really form here if return of the assign is needed.
+        // However, it is rarely used like this, so forcing every SetField operation to return the value could hurt performance
+        CPPExpression setField = new CPPExpression(jniEnvCall(callType + type + "Field", scopeVar, getFieldId.resultingVar, value.toString()), resolvedField.getType());
+        setField.jniStatements.addAll(List.of(findClass, getFieldId));
+        setField.inherit(statements);
+
+        return setField;
     }
 
     private CPPExpression transpileUnary(UnaryExpr expr) {
@@ -369,10 +470,18 @@ public class CPPTranspiler extends Transpiler {
         );
     }
 
+    private static String getFieldSignature(ResolvedFieldDeclaration field) {
+        return typeToJniSignature(field.getType().describe());
+    }
+
     private static String uniqueMethodIdName(ResolvedMethodDeclaration method) {
         var signature = getMethodSignature(method).replaceAll("[();/]", "").replace("[", "A");
 
         return uniqueClassName(method.getClassName()) + "_" + method.getName() + "_" + signature;
+    }
+
+    private static String uniqueFieldIdName(ResolvedFieldDeclaration field) {
+        return uniqueClassName(field.declaringType().getClassName()) + "_" + field.getName();
     }
 
     private static String uniqueClassName(String className) {
@@ -392,6 +501,22 @@ public class CPPTranspiler extends Transpiler {
         return new JniStatement("jmethodID " + varName + " = " +
                 jniEnvCall("GetMethodID", classStatement.resultingVar, "\"" + method.getName() + "\"", "\"" + getMethodSignature(method) + "\""),
                 JniStatementType.GET_METHOD_ID, varName
+        );
+    }
+
+    private JniStatement jniGetStaticFieldId(ResolvedFieldDeclaration field, JniStatement classStatement) {
+        var varName = uniqueFieldIdName(field);
+        return new JniStatement("jfieldID " + varName + " = " +
+                jniEnvCall("GetStaticFieldID", classStatement.resultingVar, "\"" + field.getName() + "\"", "\"" + getFieldSignature(field) + "\""),
+                JniStatementType.GET_STATIC_FIELD_ID, varName
+        );
+    }
+
+    private JniStatement jniGetFieldId(ResolvedFieldDeclaration field, JniStatement classStatement) {
+        var varName = uniqueFieldIdName(field);
+        return new JniStatement("jfieldID " + varName + " = " +
+                jniEnvCall("GetFieldID", classStatement.resultingVar, "\"" + field.getName() + "\"", "\"" + getFieldSignature(field) + "\""),
+                JniStatementType.GET_FIELD_ID, varName
         );
     }
 
@@ -546,10 +671,13 @@ public class CPPTranspiler extends Transpiler {
     }
 
     public enum JniStatementType {
+        GET_FIELD_ID("GetFieldID"),
+        GET_STATIC_FIELD_ID("GetStaticFieldID"),
         GET_METHOD_ID("GetMethodID"),
         GET_STATIC_METHOD_ID("GetStaticMethodID"),
         FIND_CLASS("FindClass"),
-        GET_OBJECT_CLASS("GetObjectClass");
+        GET_OBJECT_CLASS("GetObjectClass"),
+        ;
 
         public final String name;
 
