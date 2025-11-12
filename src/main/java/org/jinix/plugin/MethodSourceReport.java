@@ -1,20 +1,19 @@
 package org.jinix.plugin;
 
-import com.github.javaparser.ast.body.MethodDeclaration;
-import com.sun.source.tree.MethodTree;
-
 import java.io.*;
-import java.util.Collection;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 public class MethodSourceReport implements Serializable {
     @Serial
     private static final long serialVersionUID = 81262395629L;
     //TODO two compilations at the same time will result in error
-    static final File REPORT_FILE = new File(System.getProperty("java.io.tmpdir"), "jinix-report.bin");
+    static final File REPORT_FILE = new File(System.getProperty("java.io.tmpdir"), ".jinix-report");
 
-    private final Map<String, MethodData> methodData = new HashMap<>();
+    private final Map<String, ClassData> classData = new HashMap<>();
 
     public static MethodSourceReport retrieveReport(){
         if (!REPORT_FILE.exists())
@@ -27,45 +26,30 @@ public class MethodSourceReport implements Serializable {
         }
     }
 
-    public void addMethod(String className, MethodTree methodTree){
-        methodData.put(fullName(className, methodTree.getName()), new MethodData(
-                className,
-                methodTree.getName().toString(),
-                methodTree.toString()
-        ));
+    public void addMethod(String className, String methodName){
+        this.classData.get(className).nativizeMethods.add(methodName);
     }
 
-    public void addMethod(String className, MethodData data){
-        methodData.put(fullName(className, data.name), data);
-    }
-
-    static String fullName(CharSequence className, CharSequence methodName) {
-        return className + "#" + methodName;
+    public void addClassIfAbsent(String name, Supplier<String> sourceSupplier) {
+        this.classData.computeIfAbsent(name, k -> new ClassData(k, sourceSupplier.get()));
     }
 
     public boolean isMethodReported(String className, String name) {
-        return methodData.containsKey(fullName(className, name));
+        return classData.containsKey(className) && classData.get(className).nativizeMethods.contains(name);
     }
 
-    public Collection<MethodData> getMethodDataList(){
-        return methodData.values();
+    public Map<String, ClassData> getClassData() {
+        return classData;
     }
 
-    public String getMethodDeclaringClass(MethodDeclaration method) {
-        //TODO argument overload support
-        return methodData.values().stream().filter(m -> m.name.equals(method.getNameAsString())).findFirst()
-                .map(m -> m.declaringClassName).orElse(null);
-    }
-
-    public static class MethodData implements Serializable {
-        public final String declaringClassName;
+    public static class ClassData implements Serializable {
         public final String name;
-        public final String declaration;
+        public final String source;
+        public final List<String> nativizeMethods = new ArrayList<>();
 
-        public MethodData(String declaringClassName, String name, String declaration) {
-            this.declaringClassName = declaringClassName;
+        public ClassData(String name, String source) {
             this.name = name;
-            this.declaration = declaration;
+            this.source = source;
         }
     }
 }

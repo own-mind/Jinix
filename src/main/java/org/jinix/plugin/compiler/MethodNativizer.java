@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class MethodNativizer {
@@ -27,10 +28,12 @@ public class MethodNativizer {
 
         var temp = prepareTempDirectory();
 
-        var parser = new JavaParser(new ParserConfiguration().setSymbolResolver(new JavaSymbolSolver(typeSolver)));
-        var parsedMethods = report.getMethodDataList().stream()
-                .collect(Collectors.groupingBy(m -> m.declaringClassName,
-                        Collectors.mapping(m -> transpiler.parseMethod(m.declaration, parser), Collectors.toList())));
+        var parser = new JavaParser(new ParserConfiguration()
+                .setSymbolResolver(new JavaSymbolSolver(typeSolver))
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));  //TODO detect automatically
+        var parsedMethods = report.getClassData().values().stream().flatMap(c -> c.nativizeMethods.stream().map(m -> Map.entry(c.name, m)))
+                .collect(Collectors.groupingBy(Map.Entry::getKey,
+                        Collectors.mapping(m -> transpiler.parseMethod(m.getKey(), m.getValue(), parser), Collectors.toList())));
 
         this.headerFile = new File(temp, "jinix.h");
         var functionDeclarations = new HeaderGenerator().generateHeader(parsedMethods, this.headerFile);
@@ -54,7 +57,6 @@ public class MethodNativizer {
                     "-o",
                     new File(transpiledSourceFile.getParentFile(), libName).getAbsolutePath()
             );
-            System.err.println(transpiledSourceFile.getAbsolutePath());
             pb.redirectOutput(new File("out.txt"));
             pb.redirectError(new File("err.txt"));
             Process process = pb.start();

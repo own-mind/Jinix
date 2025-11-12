@@ -1,4 +1,4 @@
-rootProject.name = "Jinix"
+rootProject.name = "jinix-plugin"
 include("TestModule")
 
 pluginManagement {

@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,10 +29,10 @@ public abstract class Transpiler {
         this.sourceReport = report;
     }
 
-    protected abstract String transpileBody(MethodDeclaration method);
+    protected abstract String transpileBody(String declaringClass, MethodDeclaration method);
     protected abstract String getFileExtension();
 
-    protected String transpileMethod(JniFunctionDeclaration declaration, MethodDeclaration method) {
+    protected String transpileMethod(JniFunctionDeclaration declaration, String className, MethodDeclaration method) {
         return "%s %s(JNIEnv *%s, jobject %s%s) {\n%s}".formatted(
                 declaration.returnType(),
                 declaration.name(),
@@ -39,7 +40,7 @@ public abstract class Transpiler {
                 declaration.parameters().stream()
                         .map(p -> ", " + jniType(p.getType()) + " " + p.getName())
                         .collect(Collectors.joining()),
-                transpileBody(method).indent(4)
+                transpileBody(className, method).indent(4)
         );
     }
 
@@ -48,6 +49,12 @@ public abstract class Transpiler {
             out.println("#include \"jinix.h\"");
             out.println();
 
+
+            try (var stream = CPPTranspiler.class.getResourceAsStream("/jinix_utils.cpp")) {
+                assert stream != null;
+                out.println(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+                out.print("\n\n");
+            }
             //TODO add preamble
 
             for (String className : declarationsMap.keySet()) {
@@ -56,7 +63,7 @@ public abstract class Transpiler {
                 assert declarations.size() == methods.size();
 
                 for (int i = 0; i < declarations.size(); i++) {
-                    out.println(transpileMethod(declarations.get(i), methods.get(i)));
+                    out.println(transpileMethod(declarations.get(i), className, methods.get(i)));
                     out.println();
                 }
             }
@@ -65,14 +72,13 @@ public abstract class Transpiler {
         }
     }
 
-    public MethodDeclaration parseMethod(String methodBody, JavaParser parser) {
-        // We enclose method in a class so that Java Parser could read it
-        var enclosed = "class Dummy {\n" + methodBody + "\n}";
+    public MethodDeclaration parseMethod(String className, String methodName, JavaParser parser) {
+        var classSource = sourceReport.getClassData().get(className).source;
+        var compilationUnit = parser.parse(classSource).getResult().orElseThrow();  // TODO Cache for re-runs
 
-        var compilationUnit = parser.parse(enclosed).getResult().orElseThrow();
-
-        var dummyClass = compilationUnit.getClassByName("Dummy").orElseThrow();
-        return dummyClass.getMethods().getFirst();
+        var parts = className.split("\\.");
+        var dummyClass = compilationUnit.getClassByName(parts[parts.length - 1]).orElseThrow();
+        return dummyClass.getMethodsByName(methodName).getFirst();
     }
 
     public static String jniType(Type type) {

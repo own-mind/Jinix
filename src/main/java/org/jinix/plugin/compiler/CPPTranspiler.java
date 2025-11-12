@@ -28,6 +28,7 @@ public class CPPTranspiler extends Transpiler {
     private final Set<Include> toInclude = new HashSet<>();
 
     // Per transpilation:
+    private CodeTreeLookup lookup;
     private ResolvedType thisType;
 
     protected CPPTranspiler(TypeSolver solver, MethodSourceReport report) {
@@ -35,8 +36,9 @@ public class CPPTranspiler extends Transpiler {
     }
 
     @Override
-    protected String transpileBody(MethodDeclaration method) {
-        this.thisType = new ReferenceTypeImpl(solver.solveType(sourceReport.getMethodDeclaringClass(method)));
+    protected String transpileBody(String declaringClass, MethodDeclaration method) {
+        this.thisType = new ReferenceTypeImpl(solver.solveType(declaringClass));
+        this.lookup = new CodeTreeLookup(method);
 
         var result = new StringBuilder();
         var body = transpileStatementOrBlock(method.getBody().orElseThrow());
@@ -194,6 +196,7 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private CPPExpression transpileFieldAccess(FieldAccessExpr expr) {
+        //TODO special case for `length` in arrays
         String scope, scopeClass;
         var statements = new StatementsList();
 
@@ -318,7 +321,7 @@ public class CPPTranspiler extends Transpiler {
         String scope, scopeClass;
         var statements = new StatementsList();
 
-        //TODO Handle fields without scope `this`
+        //TODO Handle fields without scope (`this` and static)
         if (fieldExpr.getScope() instanceof ThisExpr) {
             scope = THIS_PARAM;
             scopeClass = thisType.describe();
@@ -334,13 +337,15 @@ public class CPPTranspiler extends Transpiler {
         var getFieldId = resolvedField.isStatic() ? jniGetStaticFieldId(resolvedField, findClass) :
                 jniGetFieldId(resolvedField, findClass);
 
-        String callType, scopeVar, type;
+        String callType, cast = "", scopeVar, type;
+        boolean setAndGet = !lookup.expressionResultIgnored(expr);  // If expr is not in ExpressionStmt, we must return the value
+
+        callType = setAndGet ? "SetAndGet" : "Set";
         if (resolvedField.isStatic()) {
             scopeVar = findClass.resultingVar;
-            callType = "SetStatic";
+            callType += "Static";
         } else {
             scopeVar = scope;
-            callType = "Set";
         }
 
         if (resolvedField.getType().isVoid()) {
@@ -348,6 +353,7 @@ public class CPPTranspiler extends Transpiler {
         } else if (resolvedField.getType().isPrimitive()) {
             var retType = resolvedField.getType().describe();
             type = Character.toUpperCase(retType.charAt(0)) + retType.substring(1);
+            if (setAndGet) cast = "(" + retType + ")";
         } else {
             type = "Object";
         }
@@ -355,11 +361,13 @@ public class CPPTranspiler extends Transpiler {
         var value = transpileExpression(expr.getValue());
         statements.add(value);
 
-        //FIXME case like `int a = 1 - (this.field = 2)` will fails as the assign here wouldn't return the value.
-        // Possible solution is to create custom Set<Type>Field function that would handle that and use it everywhere (*)
-        // *: It is hard to tell really form here if return of the assign is needed.
-        // However, it is rarely used like this, so forcing every SetField operation to return the value could hurt performance
-        CPPExpression setField = new CPPExpression(jniEnvCall(callType + type + "Field", scopeVar, getFieldId.resultingVar, value.toString()), resolvedField.getType());
+        CPPExpression setField = new CPPExpression(cast +
+                jniEnvCall(callType + type + "Field",
+                        setAndGet,   // Util function take env as an argument
+                        scopeVar,
+                        getFieldId.resultingVar,
+                        value.toString()
+                ), resolvedField.getType());
         setField.jniStatements.addAll(List.of(findClass, getFieldId));
         setField.inherit(statements);
 
@@ -367,11 +375,60 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private CPPExpression transpileUnary(UnaryExpr expr) {
-        return expr.getOperator().isPostfix() ?
-                new CPPExpression("%s%s", expr.calculateResolvedType(),
-                        transpileExpression(expr.getExpression()), expr.getOperator().asString())
-                : new CPPExpression("%s%s", expr.calculateResolvedType(),
-                expr.getOperator().asString(), transpileExpression(expr.getExpression()));
+        if (!(expr.getExpression() instanceof FieldAccessExpr fieldExpr) || !isModifyingUnary(expr.getOperator())) {
+            return expr.getOperator().isPostfix() ?
+                    new CPPExpression("%s%s", expr.calculateResolvedType(),
+                            transpileExpression(expr.getExpression()), expr.getOperator().asString())
+                    : new CPPExpression("%s%s", expr.calculateResolvedType(),
+                    expr.getOperator().asString(), transpileExpression(expr.getExpression()));
+        }
+
+        String scope, scopeClass;
+        var statements = new StatementsList();
+
+        //TODO Handle fields without scope (`this` and static)
+        if (fieldExpr.getScope() instanceof ThisExpr) {
+            scope = THIS_PARAM;
+            scopeClass = thisType.describe();
+        } else {
+            var transpiled = transpileExpression(fieldExpr.getScope());
+            statements.add(transpiled);
+            scope = transpiled.code;
+            scopeClass = transpiled.type.describe();
+        }
+
+        var resolvedField = fieldExpr.resolve().asField();
+        var findClass = jniFindClass(scopeClass);
+        var getFieldId = resolvedField.isStatic() ? jniGetStaticFieldId(resolvedField, findClass) :
+                jniGetFieldId(resolvedField, findClass);
+
+        String callType, cast = "", scopeVar, type;
+        callType = expr.isPostfix() ? "PostfixAdd" : "PrefixAdd";
+        if (resolvedField.isStatic()) {
+            scopeVar = findClass.resultingVar;
+            callType += "Static";
+        } else {
+            scopeVar = scope;
+        }
+
+        if (resolvedField.getType().isVoid()) {
+            type = "Void";
+        } else if (resolvedField.getType().isPrimitive()) {
+            var retType = resolvedField.getType().describe();
+            type = Character.toUpperCase(retType.charAt(0)) + retType.substring(1);
+            cast = "(" + retType + ")";
+        } else {
+            type = "Object";
+        }
+
+        CPPExpression unaryOp = new CPPExpression(cast +
+                jniEnvCall(callType + type + "Field", true, scopeVar, getFieldId.resultingVar,
+                        expr.getOperator().name().endsWith("INCREMENT") ? "1" : "-1"
+                ), resolvedField.getType());
+        unaryOp.jniStatements.addAll(List.of(findClass, getFieldId));
+        unaryOp.inherit(statements);
+
+        return unaryOp;
     }
 
     private CPPExpression transpileBinary(BinaryExpr expr) {
@@ -436,7 +493,13 @@ public class CPPTranspiler extends Transpiler {
 
     // ---------- JNI TOOLS ----------
     private static String jniEnvCall(String functionName, String... params) {
-        return "(*%s)->%s(%s)".formatted(ENV_PARAM, functionName, String.join(", ", params));
+        return jniEnvCall(functionName, false, params);
+    }
+
+    private static String jniEnvCall(String functionName, boolean envAsArg, String... params) {
+        return envAsArg ? "%s(%s, %s)".formatted(functionName, ENV_PARAM, String.join(", ", params))
+                : "%s->%s(%s)".formatted(ENV_PARAM, functionName, String.join(", ", params));
+
     }
 
     private static String typeToJniSignature(String name) {
@@ -570,6 +633,13 @@ public class CPPTranspiler extends Transpiler {
             joiner.add(codeAsStatement);
         }
         return joiner.toString();
+    }
+
+    private boolean isModifyingUnary(UnaryExpr.Operator operator) {
+        return switch (operator) {
+            case POSTFIX_DECREMENT, POSTFIX_INCREMENT, PREFIX_DECREMENT, PREFIX_INCREMENT -> true;
+            default -> false;
+        };
     }
 
     private void include(Include i) {

@@ -3,45 +3,25 @@ package org.jinix;
 public class Main {
     public static void main(String[] args) {
         Jinix.load();
-
-        var n = 100000;
-        var instance = new Main();
-        var start = System.currentTimeMillis();
-        var result = instance.test(n);
-        System.out.println("Test: " + result + ", time: " + (System.currentTimeMillis() - start) / 1000f);
-
-        start = System.currentTimeMillis();
-        result = instance.testNative(n);
-        System.out.println("Test native: " + result + ", time: " + (System.currentTimeMillis() - start) / 1000f);
+        var result = new Main().testNative(100);
+        System.out.println(result);
     }
+
+    private static final int NUMBER = 100;
+    private int counter = 0;
 
     @Nativize
     public int testNative(int n){
-        return 1;
-//        var result = 0;
-//        for (int r = 0; r < n; r++) {
-//            int[] array = new int[10000];
-//            array[0] = 1;
-//            for (int i = 2; i < 10000; i++) {
-//                array[i] = array[i - 1] + array[i - 2];
-//            }
-//            result += array[9999];
-//        }
-//
-//        return result;
-    }
+        var sum = 0;
 
-    public int test(int n) {
-        var result = 0;
-        for (int r = 0; r < n; r++) {
-            int[] array = new int[10000];
-            array[0] = 1;
-            for (int i = 2; i < 10000; i++) {
-                array[i] = array[i - 1] + array[i - 2];
-            }
-            result += array[9999];
+        for (int i = 0; i < n + Main.NUMBER; i++) {
+            sum += giveNumber(i, this.counter++);
         }
 
-        return result;
+        return sum;
+    }
+
+    private int giveNumber(int i, int counter) {
+        return i * counter;
     }
 }

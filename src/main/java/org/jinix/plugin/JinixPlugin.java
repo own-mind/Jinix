@@ -51,13 +51,13 @@ public class JinixPlugin implements Plugin<Project> {
                     }
                 });
 
+                var symbolSolver = setupTypeSolver(target);
+                new MethodNativizer(symbolSolver).nativizeReported();
+
                 try {
                     //noinspection ResultOfMethodCallIgnored
                     marker.createNewFile();
                 } catch (IOException ignored) {}
-
-                var symbolSolver = setupTypeSolver(target);
-                new MethodNativizer(symbolSolver).nativizeReported();
             });
         });
     }

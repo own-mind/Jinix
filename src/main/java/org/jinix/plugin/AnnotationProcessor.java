@@ -25,7 +25,7 @@ public class AnnotationProcessor extends AbstractProcessor {
             environment.getElementsAnnotatedWith(element)
                     .forEach(e -> {
                         if (e instanceof ExecutableElement executableElement)
-                            methodModifier.registerSource(executableElement);
+                            methodModifier.registerSource((TypeElement) executableElement.getEnclosingElement(), executableElement);
                     });
         }
 

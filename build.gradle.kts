@@ -47,11 +47,15 @@ configurations.all {
     }
 }
 
+tasks.jar {
+    archiveBaseName = "jinix-plugin"
+}
+
 publishing {
     publications {
         create("mavenJava", MavenPublication::class) {
             artifactId = "jinix-plugin"
-            artifact(tasks.jar)
+            from(components["java"])
         }
     }
     repositories {

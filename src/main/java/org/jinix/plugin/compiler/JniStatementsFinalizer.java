@@ -5,7 +5,6 @@ import org.jinix.plugin.compiler.CPPTranspiler.JniStatement;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -21,14 +20,14 @@ public class JniStatementsFinalizer {
         traverse(statements, new ArrayList<>(), null, this::expand);
 
         // TODO Loop here is not necessary, but great to have for now
-        var complete = new AtomicBoolean(false);
-        while (!complete.get()) {
-            complete.set(true);
-            traverse(statements, new ArrayList<>(), null, (block, parents, parentStatement, siblings) -> {
-                var changed = collapse(block, parents, parentStatement, siblings);
-                if (changed) complete.set(false);
-            });
-        }
+//        var complete = new AtomicBoolean(false);
+//        while (!complete.get()) {
+//            complete.set(true);
+//            traverse(statements, new ArrayList<>(), null, (block, parents, parentStatement, siblings) -> {
+//                var changed = collapse(block, parents, parentStatement, siblings);
+//                if (changed) complete.set(false);
+//            });
+//        }
 
         traverse(statements, new ArrayList<>(), null, this::sortJni);
     }
@@ -48,7 +47,7 @@ public class JniStatementsFinalizer {
             boolean bRequiresA = dependsOn(b, a);
 
             if (aRequiresB && bRequiresA)
-                throw new IllegalStateException("Circular dependency detected between JNI statements");
+                throw new IllegalStateException("Circular dependency detected between JNI statements:\n" + a + "\n" + b);
 
             if (aRequiresB) return 1;
             if (bRequiresA) return -1;
