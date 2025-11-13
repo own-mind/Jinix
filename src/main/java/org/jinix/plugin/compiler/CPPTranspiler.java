@@ -32,6 +32,8 @@ public class CPPTranspiler extends Transpiler {
 
     private final Set<Include> toInclude = new HashSet<>();
     public final LinkedHashSet<JniStatement> jniStatements = new LinkedHashSet<>();
+    // Contains used functions, which is used for filtering unused util functions
+    private final Set<String> usedUtilFunctions = new HashSet<>();
 
     // Per transpilation:
     private CodeTreeLookup lookup;
@@ -49,9 +51,8 @@ public class CPPTranspiler extends Transpiler {
 
         try (var stream = CPPTranspiler.class.getResourceAsStream("/jinix_utils.cpp")) {
             assert stream != null;
-            //TODO remove unused
-            out.println(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
-            out.print("\n\n");
+            var utilContents = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            out.println(removeUnusedUtils(utilContents));
         }
         out.println();
 
@@ -63,7 +64,6 @@ public class CPPTranspiler extends Transpiler {
             out.println("void Java_" + Jinix.class.getName().replace('.', '_') + "_init(JNIEnv *env) {");
             jniStatements.forEach(s -> out.println(indent(s.initialization)));
             out.println("}");
-            out.println();
         }
     }
 
@@ -515,11 +515,12 @@ public class CPPTranspiler extends Transpiler {
     }
 
     // ---------- JNI TOOLS ----------
-    private static String jniEnvCall(String functionName, String... params) {
+    private String jniEnvCall(String functionName, String... params) {
         return jniEnvCall(functionName, false, params);
     }
 
-    private static String jniEnvCall(String functionName, boolean envAsArg, String... params) {
+    private String jniEnvCall(String functionName, boolean envAsArg, String... params) {
+        usedUtilFunctions.add(functionName);
         return envAsArg ? "%s(%s, %s)".formatted(functionName, ENV_PARAM, String.join(", ", params))
                 : "%s->%s(%s)".formatted(ENV_PARAM, functionName, String.join(", ", params));
 
@@ -685,6 +686,23 @@ public class CPPTranspiler extends Transpiler {
             joiner.add(codeAsStatement);
         }
         return joiner.toString();
+    }
+
+    private String removeUnusedUtils(String contents) {
+        var functionNamePattern = Pattern.compile("^.+ (\\w+)\\(.+\\) ?\\{\n");
+        var result = new StringJoiner("\n\n");
+        for (String function : contents.split("\n\n")) {
+            if (function.trim().startsWith("//")) continue;
+
+            var nameMatcher = functionNamePattern.matcher(function);
+            if (!nameMatcher.find()) continue;
+            var name = nameMatcher.group(1);
+
+            if (usedUtilFunctions.contains(name))
+                result.add(function);
+        }
+
+        return result.toString();
     }
 
     private boolean isModifyingUnary(UnaryExpr.Operator operator) {

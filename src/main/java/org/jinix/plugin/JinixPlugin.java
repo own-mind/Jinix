@@ -30,36 +30,35 @@ public class JinixPlugin implements Plugin<Project> {
         target.getDependencies().add("implementation", dependencyNotation);
         target.getDependencies().add("annotationProcessor", dependencyNotation);
 
-        target.getTasks().matching(t -> t.getName().equals("classes")).all(task -> {
-            task.doLast(t -> {
-                var outputDir = target.getLayout().getBuildDirectory().file("classes/java/main").get().getAsFile();
-                var marker = new File(outputDir, ".jinix_native_transform_done");
-                if (marker.exists()) return; // Already transformed
+        target.getTasks().matching(t -> t.getName().equals("classes")).all(task -> task.doLast(t -> {
+            var outputDir = target.getLayout().getBuildDirectory().file("classes/java/main").get().getAsFile();
+            //TODO skip if there are no changes
+//                var marker = new File(outputDir, ".jinix_native_transform_done");
+//                if (marker.exists()) return; // Already transformed
 
-                target.fileTree(outputDir, spec -> spec.include("**/*.class")).forEach(classFile -> {
-                    try {
-                        byte[] original = Files.readAllBytes(classFile.toPath());
-                        var reader = new ClassReader(original);
-                        var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
-
-                        var transformer = new NativeMethodTransformer(writer);
-                        reader.accept(transformer, 0);
-
-                        Files.write(classFile.toPath(), writer.toByteArray());
-                    } catch (IOException e) {
-                        throw new NativizationException("Failed to transform " + classFile, e);
-                    }
-                });
-
-                var symbolSolver = setupTypeSolver(target);
-                new MethodNativizer(symbolSolver).nativizeReported();
-
+            target.fileTree(outputDir, spec -> spec.include("**/*.class")).forEach(classFile -> {
                 try {
-                    //noinspection ResultOfMethodCallIgnored
-                    marker.createNewFile();
-                } catch (IOException ignored) {}
+                    byte[] original = Files.readAllBytes(classFile.toPath());
+                    var reader = new ClassReader(original);
+                    var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
+
+                    var transformer = new NativeMethodTransformer(writer);
+                    reader.accept(transformer, 0);
+
+                    Files.write(classFile.toPath(), writer.toByteArray());
+                } catch (IOException e) {
+                    throw new NativizationException("Failed to transform " + classFile, e);
+                }
             });
-        });
+
+            var symbolSolver = setupTypeSolver(target);
+            new MethodNativizer(symbolSolver).nativizeReported();
+
+//                try {
+//                    noinspection ResultOfMethodCallIgnored
+//                    marker.createNewFile();
+//                } catch (IOException ignored) {}
+        }));
     }
 
     private TypeSolver setupTypeSolver(Project target) {
