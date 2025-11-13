@@ -2,6 +2,7 @@ package org.jinix.plugin.compiler;
 
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
+import org.jinix.Jinix;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,6 +14,10 @@ import static org.jinix.plugin.compiler.Transpiler.jniType;
 public class HeaderGenerator {
     private StringBuilder result;
     private Map<String, List<JniFunctionDeclaration>> declarations;
+
+    public static String jinixInitDeclaration() {
+        return "JNIEXPORT void JNICALL Java_" + Jinix.class.getName().replace('.', '_') + "_init(JNIEnv *);";
+    }
 
     private void generateDeclarations(String originalClassName, Collection<MethodDeclaration> methods) {
         String className = originalClassName.replace('.', '_');
@@ -55,6 +60,7 @@ public class HeaderGenerator {
         
         """);
 
+        result.append(jinixInitDeclaration()).append("\n");
         parsedMethods.forEach(this::generateDeclarations);
 
         // Close extern "C"
