@@ -16,8 +16,11 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.Security;
+import java.util.List;
 import java.util.stream.Collectors;
 
+import static java.security.Security.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class CPPTranspilerTest {
@@ -245,6 +248,9 @@ public class CPPTranspilerTest {
         """.trim(), transpiler.transpileBody(this.getClass().getName(), parsed));
     }
 
+    static int UPPER_STATIC = 0;
+    static void upperStatic() {}
+
     @SuppressWarnings({"DataFlowIssue", "UnusedAssignment", "UnaryPlus", "SameParameterValue"})
     static class Dummy {
         static int CONST = 0;
@@ -281,15 +287,17 @@ public class CPPTranspilerTest {
             this.field++;
             result = -this.field;
             this.field = this.b;
-
             field = 0;
             CONST = 0;
             result = +field;
             ++field;
-
             A.staticField = 1;
             a.a = 1;
             result = A.staticField;
+            getProviders();
+            upperStatic();
+            UPPER_STATIC = 1;
+            result = UPPER_STATIC;
         }
     }
 //TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
@@ -306,16 +314,16 @@ public class CPPTranspilerTest {
         var parsed = parseTestPath(Dummy.class, "method");
 
         assertEquals("""
-        env->CallVoidMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_thisCall_V);
-        env->CallVoidMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_call_V);
-        auto result = (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III, 0, 1);
-        (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III, (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III, 1, 2), 3);
+        env->CallVoidMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_thisCall);
+        env->CallVoidMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_call);
+        auto result = (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_II, 0, 1);
+        (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_II, (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_II, 1, 2), 3);
         jobject a = nullptr;
-        env->CallVoidMethod(a, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_call_V);
-        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V);
-        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V);
-        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V);
-        result = (int)env->CallStaticIntMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_IJI, 0, 1);
+        env->CallVoidMethod(a, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_call);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall);
+        result = (int)env->CallStaticIntMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_IJ, 0, 1);
         env->SetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
         result = ((int)SetAndGetIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1));
         (int)PrefixAddIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
@@ -323,29 +331,38 @@ public class CPPTranspilerTest {
         result = -(int)env->GetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field);
         env->SetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, (int)env->GetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_b));
         env->SetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 0);
-        env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_CONST, 0);
+        env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_CONST, 0);
         result = +(int)env->GetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field);
         (int)PrefixAddIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
         env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticField, 1);
         env->SetIntField(a, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_a, 1);
         result = (int)env->GetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticField);
-        """.trim(), transpiler.transpileBody(this.getClass().getName(), parsed));
+        env->CallStaticObjectMethod(class_java_security_Security, java_security_Security_getProviders);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_upperStatic);
+        env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_UPPER_STATIC, 1);
+        result = (int)env->GetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_UPPER_STATIC);
+        """.trim(), transpiler.transpileBody(Dummy.class.getName(), parsed));
 
         transpiler.beforeMethods(new PrintWriter(new NullWriter()));
         assertEquals("""
-        class_org_jinix_plugin_compiler_CPPTranspilerTest = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_thisCall_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "thisCall", "()V");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_call_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "()V");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "withParams", "(II)I");
+        class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest/Dummy");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_thisCall = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, "thisCall", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_call = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, "call", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_II = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, "withParams", "(II)I");
         class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest/Dummy/A");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_call_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "call", "()V");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticCall", "()V");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_IJI = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticCall", "(IJ)I");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "field", "I");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_b = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "b", "I");
-        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_CONST = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "CONST", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_call = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "call", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticCall", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_IJ = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticCall", "(IJ)I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, "field", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_b = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, "b", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_CONST = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy, "CONST", "I");
         org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticField = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticField", "I");
         org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_a = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "a", "I");
+        class_java_security_Security = env->FindClass("java/security/Security");
+        java_security_Security_getProviders = env->GetStaticMethodID(class_java_security_Security, "getProviders", "()[Ljava/security/Provider;");
+        class_org_jinix_plugin_compiler_CPPTranspilerTest = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
+        org_jinix_plugin_compiler_CPPTranspilerTest_upperStatic = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "upperStatic", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_UPPER_STATIC = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "UPPER_STATIC", "I");
         """.trim(), transpiler.jniStatements.stream().map(CPPTranspiler.JniStatement::initialization).collect(Collectors.joining("\n")));
     }
 

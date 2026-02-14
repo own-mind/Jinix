@@ -88,7 +88,7 @@ public class CPPTranspiler extends Transpiler {
     }
 
     public String transpileBody(String declaringClass, MethodDeclaration method) {
-        this.thisType = new ReferenceTypeImpl(solver.solveType(declaringClass));
+        this.thisType = new ReferenceTypeImpl(solver.solveType(declaringClass.replace("$", ".")));
         this.lookup = new CodeTreeLookup(method);
 
         var result = new StringBuilder();
@@ -246,12 +246,10 @@ public class CPPTranspiler extends Transpiler {
     private CPPExpression transpileName(NameExpr expr) {
         try {
             if (expr.resolve() instanceof ResolvedFieldDeclaration field) {
-                // FIXME static import will break this
-                return transpileFieldAccess(new ThisExpr(), field);
+                return transpileFieldAccess(null, field);
             }
         } catch (UnsolvedSymbolException e) {
             // TODO: Workaround for SymbolSolver bug where ClassContext cannot solve nested class as NameExpr in static call
-
         }
 
         return new CPPExpression(expr.getNameAsString(), expr.calculateResolvedType());
@@ -271,8 +269,18 @@ public class CPPTranspiler extends Transpiler {
 
     private CPPExpression transpileFieldAccess(Expression scopeExpr, ResolvedFieldDeclaration resolvedField) {
         //TODO special case for `length` in arrays
+        JniStatement findClass = null;
         String scope, scopeClass;
-        if (scopeExpr instanceof ThisExpr) {
+        if (scopeExpr == null) {
+            if (resolvedField.isStatic()) {  // TODO add instance fields from enclosed class
+                scopeClass = resolvedField.declaringType().getQualifiedName();
+                findClass = jniFindClass(scopeClass);
+                scope = findClass.resultingVar();    // A bit confusing. Here scope is always the class
+            } else {
+                scope = THIS_PARAM;
+                scopeClass = thisType.describe();
+            }
+        } else if (scopeExpr instanceof ThisExpr) {
             scope = THIS_PARAM;
             scopeClass = thisType.describe();
         } else {
@@ -281,7 +289,7 @@ public class CPPTranspiler extends Transpiler {
             scopeClass = transpiled.type.describe();
         }
 
-        var findClass = jniFindClass(scopeClass);
+        findClass = findClass != null ? findClass : jniFindClass(scopeClass);
         var getFieldId = resolvedField.isStatic() ? jniGetStaticFieldId(resolvedField, findClass) :
                 jniGetFieldId(resolvedField, findClass);
 
@@ -309,9 +317,21 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private CPPExpression transpileCall(MethodCallExpr expr) {
+        var resolvedMethod = expr.resolve();
+        JniStatement findClass = null;
+
         var scopeExpr = expr.getScope().orElse(null);
         String scope, scopeClass;
-        if (scopeExpr == null || scopeExpr instanceof ThisExpr) {
+        if (scopeExpr == null) {
+            if (resolvedMethod.isStatic()) {  // TODO add method calls from enclosed class
+                scopeClass = resolvedMethod.declaringType().getQualifiedName();
+                findClass = jniFindClass(scopeClass);
+                scope = findClass.resultingVar();    // A bit confusing. Here scope is always the class
+            } else {
+                scope = THIS_PARAM;
+                scopeClass = thisType.describe();
+            }
+        } else if (scopeExpr instanceof ThisExpr) {
             scope = THIS_PARAM;
             scopeClass = thisType.describe();
         } else {
@@ -320,8 +340,7 @@ public class CPPTranspiler extends Transpiler {
             scopeClass = transpiled.type.describe();
         }
 
-        var resolvedMethod = expr.resolve();
-        var findClass = jniFindClass(scopeClass);
+        findClass = findClass != null ? findClass : jniFindClass(scopeClass);
         var getMethodId = resolvedMethod.isStatic() ? jniGetStaticMethodId(resolvedMethod, findClass) :
                 jniGetMethodId(resolvedMethod, findClass);
 
@@ -416,16 +435,21 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private @Nullable ScopeExtraction extractScope(Expression expr) {
+        String scope, scopeClass;
         if (!expr.isFieldAccessExpr()) {
             if (expr.isNameExpr() && expr.asNameExpr().resolve() instanceof ResolvedFieldDeclaration field) {
-                // FIXME static import will break this
+                if (field.isStatic()) {
+                    scopeClass = field.declaringType().getQualifiedName();
+                    var findClass = jniFindClass(scopeClass);
+                    registerJniStatement(findClass);
+                    return new ScopeExtraction(findClass.resultingVar(), scopeClass, field);
+                }
                 return new ScopeExtraction(THIS_PARAM, thisType.describe(), field);
             } else {
                 return null;
             }
         }
 
-        String scope, scopeClass;
         var fieldExpr = expr.asFieldAccessExpr();
         if (fieldExpr.getScope() instanceof ThisExpr) {
             scope = THIS_PARAM;
@@ -565,6 +589,8 @@ public class CPPTranspiler extends Transpiler {
             default -> {
                 if (name.startsWith("[")) {
                     yield name.replace(".", "/");
+                } else if (name.endsWith("[]")) {
+                    yield "[L" + name.replace("[]", "").replace(".", "/") + ";";
                 } else {
                     yield "L" + name.replace(".", "/") + ";";
                 }
@@ -587,9 +613,12 @@ public class CPPTranspiler extends Transpiler {
     }
 
     private static String uniqueMethodIdName(ResolvedMethodDeclaration method) {
-        var signature = getMethodSignature(method).replaceAll("[();/]", "").replace("[", "A");
+        var signature = getMethodSignature(method).replaceAll("^\\((.*)\\).+$", "$1")
+                .replaceAll("[();]", "")
+                .replace("[", "A").replace(".", "_").replace("/", "_");
+        if (!signature.isEmpty()) signature = "_" + signature;
 
-        return uniqueClassName(method.declaringType()) + "_" + method.getName() + "_" + signature;
+        return uniqueClassName(method.declaringType()) + "_" + method.getName() + signature;
     }
 
     private static String uniqueFieldIdName(ResolvedFieldDeclaration field) {
