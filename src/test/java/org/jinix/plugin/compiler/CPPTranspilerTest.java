@@ -2,23 +2,27 @@ package org.jinix.plugin.compiler;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.resolution.SymbolResolver;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import org.codehaus.groovy.control.io.NullWriter;
+import org.jinix.Nativize;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class CPPTranspilerTest {
     private final CPPTranspiler transpiler;
-    private final SymbolResolver resolver;
+    private final JavaSymbolSolver resolver;
 
     {
         var solver = new CombinedTypeSolver();
@@ -191,9 +195,8 @@ public class CPPTranspilerTest {
 
     @Test
     void loops() {
+        // TODO test for-each
         var parsed = parse("""
-        public int[] array;  // declared here to avoid transpilation
-        
         void method() {
             int a = 0;
             int b = 0;
@@ -213,9 +216,6 @@ public class CPPTranspilerTest {
             }
             for (i = 0, b = 0;;);
             for (;;);
-            for (int c : array) {
-                a = 1;
-            }
         }
         """);
 
@@ -242,96 +242,125 @@ public class CPPTranspilerTest {
         for (; ; ) {
             ;
         }
-        for (int c : array) {
-            a = 1;
-        }
         """.trim(), transpiler.transpileBody(this.getClass().getName(), parsed));
     }
 
-    @Test
-    void methodsAndFields() throws Exception {
-        //TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
-        // if "a" is certain class that has nativized method, ahead of time if possible (maybe with annotation) or in runtime (less favorable)
-        var parsed = parse("""
-        public int a = 1;
-        public int b = 2;
+    @SuppressWarnings({"DataFlowIssue", "UnusedAssignment", "UnaryPlus", "SameParameterValue"})
+    static class Dummy {
+        static int CONST = 0;
+        int field = 1;
+        int b = 2;
         @Nativize
         void nativizedCall(){}
         void thisCall(){}
         void call(){}
         int withParams(int a, int b){ return a + b; }
-        class A {
-            public static int staticField = 0;
-            public int a = 1;
-            static void staticCall();
-            static int staticCall(int a, long b);
+
+        public static class A {
+            static int staticField = 0;
+            int a = 1;
+            static void staticCall(){}
+            static int staticCall(int a, long b){ return 1; }
             void call(){}
         }
-        
+
         void method() {
             thisCall();
             this.call();
             var result = withParams(0, 1);
             withParams(withParams(1, 2), 3);
-            A a;
+            A a = null;
             a.call();
             A.staticCall();
-            var result = A.staticCall(0, 1);
-            this.a = 1;
-            var result = (this.a = 1);
-            ++this.a;
-            this.a++;
-            var result = -this.a;
-            this.a = this.b;
+            Dummy.A.staticCall();
+            org.jinix.plugin.compiler.CPPTranspilerTest.Dummy.A.staticCall();
+            result = A.staticCall(0, 1);
+            this.field = 1;
+            result = (this.field = 1);
+            ++this.field;
+            this.field++;
+            result = -this.field;
+            this.field = this.b;
+
+            field = 0;
+            CONST = 0;
+            result = +field;
+            ++field;
+
             A.staticField = 1;
             a.a = 1;
-            var result = A.staticField;
+            result = A.staticField;
         }
-        """);
+    }
+//TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
+// if "a" is certain class that has nativized method, ahead of time if possible (maybe with annotation) or in runtime (less favorable)
+
 //            this.vararg(1, 2, 3);
 //            this.nativizedCall();
 //            var result = withParamsNativized(a, b);
 //            A.nativeStaticCall();
 //            this.nativizedVararg(1, 2, 3);
-//
-//        }
-//        """);
+
+    @Test
+    void methodsAndFields() throws Exception {
+        var parsed = parseTestPath(Dummy.class, "method");
 
         assertEquals("""
-        env->CallVoidMethod(thisObject, Dummy_thisCall_V);
-        env->CallVoidMethod(thisObject, Dummy_call_V);
-        auto result = (int)env->CallIntMethod(thisObject, Dummy_withParams_III, 0, 1);
-        (int)env->CallIntMethod(thisObject, Dummy_withParams_III, (int)env->CallIntMethod(thisObject, Dummy_withParams_III, 1, 2), 3);
-        jobject a;
-        env->CallVoidMethod(a, Dummy_A_call_V);
-        env->CallStaticVoidMethod(class_Dummy_A, Dummy_A_staticCall_V);
-        auto result = (int)env->CallStaticIntMethod(class_Dummy_A, Dummy_A_staticCall_IJI, 0, 1);
-        env->SetIntField(thisObject, Dummy_a, 1);
-        auto result = ((int)SetAndGetIntField(env, thisObject, Dummy_a, 1));
-        (int)PrefixAddIntField(env, thisObject, Dummy_a, 1);
-        (int)PostfixAddIntField(env, thisObject, Dummy_a, 1);
-        auto result = -(int)env->GetIntField(thisObject, Dummy_a);
-        env->SetIntField(thisObject, Dummy_a, (int)env->GetIntField(thisObject, Dummy_b));
-        env->SetStaticIntField(class_Dummy_A, Dummy_A_staticField, 1);
-        env->SetIntField(a, Dummy_A_a, 1);
-        auto result = (int)env->GetStaticIntField(class_Dummy_A, Dummy_A_staticField);
+        env->CallVoidMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_thisCall_V);
+        env->CallVoidMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_call_V);
+        auto result = (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III, 0, 1);
+        (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III, (int)env->CallIntMethod(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III, 1, 2), 3);
+        jobject a = nullptr;
+        env->CallVoidMethod(a, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_call_V);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V);
+        env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V);
+        result = (int)env->CallStaticIntMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_IJI, 0, 1);
+        env->SetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
+        result = ((int)SetAndGetIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1));
+        (int)PrefixAddIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
+        (int)PostfixAddIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
+        result = -(int)env->GetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field);
+        env->SetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, (int)env->GetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_b));
+        env->SetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 0);
+        env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_CONST, 0);
+        result = +(int)env->GetIntField(thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field);
+        (int)PrefixAddIntField(env, thisObject, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field, 1);
+        env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticField, 1);
+        env->SetIntField(a, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_a, 1);
+        result = (int)env->GetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticField);
         """.trim(), transpiler.transpileBody(this.getClass().getName(), parsed));
 
         transpiler.beforeMethods(new PrintWriter(new NullWriter()));
         assertEquals("""
         class_org_jinix_plugin_compiler_CPPTranspilerTest = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
-        Dummy_thisCall_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "thisCall", "()V");
-        Dummy_call_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "()V");
-        Dummy_withParams_III = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "withParams", "(II)I");
-        class_Dummy_A = env->FindClass("Dummy/A");
-        Dummy_A_call_V = env->GetMethodID(class_Dummy_A, "call", "()V");
-        Dummy_A_staticCall_V = env->GetStaticMethodID(class_Dummy_A, "staticCall", "()V");
-        Dummy_A_staticCall_IJI = env->GetStaticMethodID(class_Dummy_A, "staticCall", "(IJ)I");
-        Dummy_a = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "a", "I");
-        Dummy_b = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "b", "I");
-        Dummy_A_staticField = env->GetStaticFieldID(class_Dummy_A, "staticField", "I");
-        Dummy_A_a = env->GetFieldID(class_Dummy_A, "a", "I");
-        """.trim(), transpiler.jniStatements.stream().map(s -> s.initialization).collect(Collectors.joining("\n")));
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_thisCall_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "thisCall", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_call_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "call", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_withParams_III = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "withParams", "(II)I");
+        class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest/Dummy/A");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_call_V = env->GetMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "call", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_V = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticCall", "()V");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticCall_IJI = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticCall", "(IJ)I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_field = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "field", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_b = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "b", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_CONST = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "CONST", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_staticField = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "staticField", "I");
+        org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A_a = env->GetFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest_Dummy_A, "a", "I");
+        """.trim(), transpiler.jniStatements.stream().map(CPPTranspiler.JniStatement::initialization).collect(Collectors.joining("\n")));
+    }
+
+    private MethodDeclaration parseTestPath(Class<?> clazz, String method) {
+        String source;
+        try {
+            source = Files.readString(Path.of("src/test/java/org/jinix/plugin/compiler/CPPTranspilerTest.java"));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        var parser = new JavaParser(new ParserConfiguration().setSymbolResolver(this.resolver).setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+        var compilationUnit = parser.parse(source).getResult().orElseThrow();
+        var thisClass = compilationUnit.getClassByName(CPPTranspilerTest.class.getSimpleName()).orElseThrow();
+        var dummyClass = (ClassOrInterfaceDeclaration) thisClass.getChildNodes().stream().filter(n -> n instanceof ClassOrInterfaceDeclaration d && d.getNameAsString().equals(clazz.getSimpleName())).findFirst().orElseThrow();
+        return dummyClass.getMethods().stream().filter(m -> m.getNameAsString().equals(method)).findFirst().orElseThrow();
     }
 
     public MethodDeclaration parse(String code){

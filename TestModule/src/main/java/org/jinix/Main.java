@@ -14,8 +14,8 @@ public class Main {
     public int testNative(int n){
         var sum = 0;
 
-        for (int i = 0; i < n + Main.NUMBER; i++) {
-            sum += giveNumber(i, this.counter++);
+        for (int i = 0; i < n + NUMBER; i++) {
+            sum += giveNumber(i, counter++);
         }
 
         return sum;
