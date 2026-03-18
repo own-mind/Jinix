@@ -298,6 +298,7 @@ public class CPPTranspilerTest {
             upperStatic();
             UPPER_STATIC = 1;
             result = UPPER_STATIC;
+            System.out.println(result);
         }
     }
 //TODO Add nativized calls for "a.nativeCall()". You need to have a mechanism to know (if possible),
@@ -341,6 +342,7 @@ public class CPPTranspilerTest {
         env->CallStaticVoidMethod(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_upperStatic);
         env->SetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_UPPER_STATIC, 1);
         result = (int)env->GetStaticIntField(class_org_jinix_plugin_compiler_CPPTranspilerTest, org_jinix_plugin_compiler_CPPTranspilerTest_UPPER_STATIC);
+        env->CallVoidMethod(env->GetStaticObjectField(class_java_lang_System, java_lang_System_out), java_io_PrintStream_println_I, result);
         """.trim(), transpiler.transpileBody(Dummy.class.getName(), parsed));
 
         transpiler.beforeMethods(new PrintWriter(new NullWriter()));
@@ -363,6 +365,10 @@ public class CPPTranspilerTest {
         class_org_jinix_plugin_compiler_CPPTranspilerTest = env->FindClass("org/jinix/plugin/compiler/CPPTranspilerTest");
         org_jinix_plugin_compiler_CPPTranspilerTest_upperStatic = env->GetStaticMethodID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "upperStatic", "()V");
         org_jinix_plugin_compiler_CPPTranspilerTest_UPPER_STATIC = env->GetStaticFieldID(class_org_jinix_plugin_compiler_CPPTranspilerTest, "UPPER_STATIC", "I");
+        class_java_lang_System = env->FindClass("java/lang/System");
+        java_lang_System_out = env->GetStaticFieldID(class_java_lang_System, "out", "Ljava/io/PrintStream;");
+        class_java_io_PrintStream = env->FindClass("java/io/PrintStream");
+        java_io_PrintStream_println_I = env->GetMethodID(class_java_io_PrintStream, "println", "(I)V");
         """.trim(), transpiler.jniStatements.stream().map(CPPTranspiler.JniStatement::initialization).collect(Collectors.joining("\n")));
     }
 

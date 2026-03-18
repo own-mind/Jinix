@@ -1,0 +1,16 @@
+/home/own/Projects/Jinix/.jinix/jinix.cpp: In function ‘jint Java_org_jinix_Main_testNative(JNIEnv*, jobject, jint)’:
+/home/own/Projects/Jinix/.jinix/jinix.cpp:37:10: error: ‘string’ is not a member of ‘std’
+   37 |     std::string str = "";
+      |          ^~~~~~
+/home/own/Projects/Jinix/.jinix/jinix.cpp:3:1: note: ‘std::string’ is defined in header ‘<string>’; this is probably fixable by adding ‘#include <string>’
+    2 | #include "string.h"
+  +++ |+#include <string>
+    3 | 
+/home/own/Projects/Jinix/.jinix/jinix.cpp:40:9: error: ‘str’ was not declared in this scope; did you mean ‘std’?
+   40 |         str += env->CallStaticObjectMethod(class_java_lang_Integer, java_lang_Integer_toString_I, i);
+      |         ^~~
+      |         std
+/home/own/Projects/Jinix/.jinix/jinix.cpp:42:145: error: ‘str’ was not declared in this scope; did you mean ‘std’?
+   42 |     env->CallVoidMethod(env->GetStaticObjectField(class_java_lang_System, java_lang_System_out), java_io_PrintStream_println_Ljava_lang_String, str);
+      |                                                                                                                                                 ^~~
+      |                                                                                                                                                 std

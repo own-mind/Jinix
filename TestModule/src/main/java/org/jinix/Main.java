@@ -13,14 +13,18 @@ public class Main {
     @Nativize
     public int testNative(int n){
         var sum = 0;
+        String str = "";
 
         for (int i = 0; i < n + NUMBER; i++) {
             sum += giveNumber(i, counter++);
+            str += Integer.toString(i);
         }
 
+        System.out.println(str);
         return sum;
     }
 
+    //TODO nativize this method
     private int giveNumber(int i, int counter) {
         return i * counter;
     }
